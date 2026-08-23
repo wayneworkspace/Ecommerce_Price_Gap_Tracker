@@ -1,0 +1,6 @@
+playwright
+pandas
+numpy
+python-dotenv
+datetime
+pathlib
