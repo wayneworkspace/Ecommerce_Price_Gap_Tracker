@@ -78,6 +78,29 @@ The rendered page showed the product title, images, and breadcrumb (server-rende
 
 ---
 
+## Issue 5: Price API response consistently arrives too late — price widget never renders, despite no captcha and no JS errors (status: investigating)
+
+**Evidence:**
+
+Page renders cleanly — title, images, breadcrumb, and logged-in account all correct — but the price box stays an empty grey placeholder even after waiting 25 seconds:
+
+![Issue 5 - price widget stays empty after 25s wait](Issue_5_PriceNeverLoads.png)
+
+Console/page-error listeners (`page.on("console")`, `page.on("pageerror")`) were added to rule out a JS crash (the Issue 4 pattern) — no errors were logged, ruling that out. The `pdp/get_pc` API response for the correct `item_id` was still captured on some runs, but consistently *after* the wait cutoff (confirmed at both 15s and 25s cutoffs), not before it.
+
+**Reason (not yet fully confirmed):**
+- No captcha, no login wall, no JS error — the page and session are healthy by every check available so far.
+- Leading hypothesis: Shopee applies a *soft* anti-scraping delay — rather than an outright block, repeated automated requests for the same `item_id` from the same account/profile in a short time window may get their price-API response deliberately slowed down. This would explain why the same script worked reliably on earlier runs (first few calls) but degraded after dozens of repeated calls against the same SKU within about an hour.
+- Alternative (ruled less likely but not fully eliminated): background-tab throttling by Chrome — tested by forcing the window to foreground with `page.bring_to_front()`, which made no measurable difference, so this is probably not the main cause.
+
+**Solve (mitigations in place / next steps):**
+- Replaced the fixed `time.sleep(6)` wait with a polling loop (`while captured["data"] is None and waited < max_wait`) so the wait adapts to actual response time instead of guessing a fixed duration.
+- Added evidence capture (`page.screenshot()` + `page.content()` saved to `data/debug/`) on every failed attempt, *before* closing the browser — this is what made this issue diagnosable at all instead of a silent black box.
+- Added `page.on("console", ...)` and `page.on("pageerror", ...)` listeners for future runs, to catch a JS-crash cause immediately if it recurs.
+- Next step to confirm/rule out the rate-limiting hypothesis: stop running the script for 10-15 minutes, then run once and compare the response delay against the same test run back-to-back with previous attempts. If the delay drops back to normal after a cooldown, this confirms Shopee-side soft throttling, and the long-term fix is to add spacing (e.g. a minimum interval) between scrape runs against the same SKU rather than retrying immediately.
+
+---
+
 ## Notes — data extraction learnings (not blockers, just corrections)
 
 - The product's title field in the `pdp/get_pc` API response is `"title"`, not `"name"` as initially assumed — update any code that reads `item.get("name")` to `item.get("title")`.
