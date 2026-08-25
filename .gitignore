@@ -2,3 +2,6 @@
 __pycache__/
 data/raw/*.json
 .env
+shopee_page_dump.html
+shopee_cookies.json
+Shopee Profile/
