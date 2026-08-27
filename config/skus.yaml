@@ -1,18 +1,47 @@
-# Danh sách SKU cần theo dõi.
+# Danh sách SKU cần theo dõi, và các LISTING của từng SKU trên từng sàn.
 #
-# Đây là DỮ LIỆU, không phải code: đổi SKU / thêm kênh chỉ sửa file này, không
-# đụng Python, không cần chạy lại test. Trước đây item_id và url bị hard-code
-# thẳng trong config.py — đi tiếp đường đó thì 3 SKU x 3 kênh = 9 biến nằm rải
-# rác trong code, mỗi lần đổi là một commit sửa code.
+# Đây là DỮ LIỆU, không phải code: thêm listing / đổi SKU chỉ sửa file này,
+# không đụng Python, không cần sửa test.
 #
-# reference_price: giá niêm yết chính hãng (VND). Để đây để dbt seed file này
-# thành bảng rồi join ra price_gap, khỏi phải nhét số vào trong model.
+# ---------------------------------------------------------------------------
+# Vì sao mỗi nguồn là một DANH SÁCH chứ không phải một listing
+# ---------------------------------------------------------------------------
+# Cùng một sản phẩm được nhiều người bán khác nhau rao trên cùng một sàn, mỗi
+# người một item_id riêng. Đó chính là dữ liệu trả lời câu hỏi kinh doanh của
+# dự án: "seller nào đang bán dưới giá niêm yết". Nếu mỗi nguồn chỉ có một
+# listing thì không bao giờ tính ra được gap — hoá ra là so giá cửa hàng chính
+# hãng với chính nó.
+#
+# ---------------------------------------------------------------------------
+# listing_title dùng để làm gì
+# ---------------------------------------------------------------------------
+# KHÔNG phải để code đọc. Code không dùng field này.
+#
+# Nó là BẰNG CHỨNG cho quyết định ánh xạ. Hai shop dưới đây đặt tên khác nhau
+# ("G102 Lightsync" và "G102 Gen2 Lightsync") nhưng đã được xác nhận bản chất
+# là cùng một sản phẩm, nên xếp chung một SKU logic. Ba tháng sau nhìn lại,
+# hai dòng chỉ có item_id thì không ai kiểm chứng nổi phép ánh xạ đó đúng hay
+# sai — giữ nguyên văn tiêu đề người bán đặt thì kiểm được.
+#
+# reference_price: giá niêm yết chính hãng (VND), gắn với SKU logic chứ không
+# gắn với listing. dbt seed file này thành bảng rồi join qua cột `sku` để ra
+# price_gap. Đó là lý do record phải mang `sku`, không chỉ mang item_id.
+#
+# URL đã cắt bỏ đuôi ?extraParams=... — nó gắn với phiên xem của một người
+# dùng cụ thể, không cần cho việc cào, và chính nó từng lộ ra trong ảnh docs.
 
 - sku: G102-LIGHTSYNC
   name: "Logitech G102 Lightsync"
   reference_price: 489000
   sources:
     shopee:
-      item_id: "6765591429"
-      shop_id: "52679373"
-      url: "https://shopee.vn/Chu%E1%BB%99t-gaming-c%C3%B3-d%C3%A2y-Logitech-G102-Lightsync-T%C3%B9y-ch%E1%BB%89nh-RGB-6-n%C3%BAt-l%E1%BA%ADp-tr%C3%ACnh-nh%E1%BA%B9-i.52679373.6765591429"
+      - shop_id: "52679373"
+        item_id: "6765591429"
+        is_official: true
+        listing_title: "Chuột gaming có dây Logitech G102 Lightsync - Tùy chỉnh RGB, 6 nút lập trình, nhẹ"
+        url: "https://shopee.vn/Chu%E1%BB%99t-gaming-c%C3%B3-d%C3%A2y-Logitech-G102-Lightsync-T%C3%B9y-ch%E1%BB%89nh-RGB-6-n%C3%BAt-l%E1%BA%ADp-tr%C3%ACnh-nh%E1%BA%B9-i.52679373.6765591429"
+      - shop_id: "1256164758"
+        item_id: "26201330261"
+        is_official: false
+        listing_title: "Chuột Gaming Logitech G102 Gen2 Lightsync – RGB DPI cao chính hãng Bảo hành 24 tháng"
+        url: "https://shopee.vn/Chu%E1%BB%99t-Gaming-Logitech-G102-Gen2-Lightsync-%E2%80%93-RGB-DPI-cao-ch%C3%ADnh-h%C3%A3ng-B%E1%BA%A3o-h%C3%A0nh-24-th%C3%A1ng-i.1256164758.26201330261"

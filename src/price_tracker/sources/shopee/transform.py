@@ -3,7 +3,9 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from price_tracker.config import RAW_DIR, STAGING_DIR
+from price_tracker.config import (
+    RAW_DIR, STAGING_DIR, load_source_listings, listing_label)
+from price_tracker.sources.shopee.settings import RAW_FILE_PREFIX
 from price_tracker.sources.shopee.payload import (
     find_item_in_raw,
     describe_raw_problem,
@@ -20,8 +22,14 @@ logger = logging.getLogger(__name__)
 SHOPEE_PRICE_SCALE = 100_000
 
 
-def find_latest_raw_file() -> Path:
-    """Trả file raw mới nhất còn DÙNG ĐƯỢC — không phải file mới nhất.
+def find_latest_raw_file(item_id: str) -> Path:
+    """Trả file raw mới nhất còn DÙNG ĐƯỢC **của đúng SKU này**.
+
+    item_id là tham số BẮT BUỘC, cố ý không cho mặc định. Bản trước glob
+    "shopee_raw_*.json" tức vơ hết mọi SKU rồi trả về đúng một file mới nhất —
+    với 1 SKU thì vô hại, nhưng từ SKU thứ 2 là N-1 SKU bị bỏ rơi IM LẶNG:
+    transform chạy xong, không lỗi, chỉ là thiếu gần hết dữ liệu. Để item_id
+    có giá trị mặc định là mời cái bug đó quay lại.
 
     Khác biệt đó là cả vấn đề. Bản cũ lấy thẳng file mtime lớn nhất, nên chỉ cần
     một file hỏng lọt vào data/raw/ là nó vĩnh viễn là file được chọn, và mọi
@@ -32,11 +40,12 @@ def find_latest_raw_file() -> Path:
     cào lành là pipeline chạy tiếp được. Mỗi file bị bỏ qua đều log warning kèm
     tên và lý do, để còn biết đường đi dọn.
     """
-    files = sorted(RAW_DIR.glob("shopee_raw_*.json"),
+    files = sorted(RAW_DIR.glob(f"{RAW_FILE_PREFIX}_{item_id}_*.json"),
                    key=lambda p: p.stat().st_mtime, reverse=True)
     if not files:
         raise FileNotFoundError(
-            f"Không tìm thấy file raw nào trong {RAW_DIR} — chạy extract trước.")
+            f"Không có file raw nào của item_id={item_id} trong {RAW_DIR} — "
+            f"chạy extract trước.")
 
     skipped: list[str] = []
     for path in files:
@@ -71,8 +80,9 @@ def find_latest_raw_file() -> Path:
         logger.warning("Bỏ qua file raw hỏng %s — %s", path.name, reason)
 
     raise FileNotFoundError(
-        f"Có {len(files)} file raw trong {RAW_DIR} nhưng không file nào dùng được. "
-        f"Đã bỏ qua: {', '.join(skipped)}. Chạy lại extract để lấy bản mới."
+        f"Có {len(files)} file raw của item_id={item_id} trong {RAW_DIR} nhưng "
+        f"không file nào dùng được. Đã bỏ qua: {', '.join(skipped)}. "
+        f"Chạy lại extract để lấy bản mới."
     )
 
 
@@ -140,7 +150,29 @@ def resolve_scraped_at(raw, raw_path: Path) -> str:
     )
 
 
-def build_record(raw_path: Path) -> dict:
+def build_record(raw_path: Path, listing_cfg: dict) -> dict:
+    """Ép file raw về schema chung, trộn thêm phần danh tính đến từ cấu hình.
+
+    listing_cfg là tham số BẮT BUỘC, cố ý không cho mặc định. Record phải mang
+    HAI TẦNG danh tính, và tầng trên chỉ có trong cấu hình:
+
+      - `sku`      — SKU logic ("G102-LIGHTSYNC"). Đây là KHOÁ JOIN tới
+                     reference_price ở mart layer. Nhiều người bán rao cùng một
+                     sản phẩm, mỗi listing một item_id khác nhau; không có cột
+                     này thì mart không có đường nào nối về giá niêm yết, tức
+                     không tính được price_gap_pct — mất toàn bộ mục đích dự án.
+      - `item_id`  — mã LISTING trên sàn. Tên cũ là `sku_id`, sai bản chất:
+                     nó chưa bao giờ là SKU, chỉ là id của một tin đăng.
+      - `source`   — tên sàn. item_id chỉ duy nhất TRONG một sàn, nên khoá tự
+                     nhiên (sku, source, item_id, scraped_at) mà thiếu source
+                     là mời đụng độ ngay khi TikTok đổ vào cùng staging dir.
+      - `is_official` — cũng đến từ cấu hình, không có trong payload Shopee.
+                     Thiếu nó thì mart không phân biệt nổi giá chính hãng với
+                     giá của người bán khác, mà đó chính là câu hỏi cần trả lời.
+
+    Cho listing_cfg một giá trị mặc định sẽ khiến chỗ gọi quên truyền mà vẫn
+    chạy, đẻ ra record thiếu khoá join — hỏng im lặng tới tận mart layer.
+    """
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
 
     # Không index thẳng raw["data"]["data"]["item"] nữa: với file độc thì nó nổ
@@ -154,7 +186,20 @@ def build_record(raw_path: Path) -> dict:
         )
 
     return {
-        "sku_id": item.get("item_id"),
+        # Tầng 1 — danh tính logic, đến từ config/skus.yaml
+        "sku": listing_cfg.get("sku"),
+        "is_official": listing_cfg.get("is_official"),
+        "source": "shopee",
+        # Tầng 2 — danh tính trên sàn.
+        # item_id lấy từ CẤU HÌNH chứ không từ payload, dù payload cũng có.
+        # Hai lý do: (1) payload thiếu field này thì record mang item_id=None
+        # và save_record đặt tên file shopee_record_None_<ts>.json — hai listing
+        # cào trong cùng một giây ghi đè nhau; (2) payload trả int còn skus.yaml
+        # và find_latest_raw_file() dùng str, để lệch kiểu thì mọi phép join
+        # sau này với bảng seed cấu hình phải cast mà không ai ghi lại là vì sao.
+        # extract.fetch_one_listing() đã đối chiếu payload khớp cấu hình trước
+        # khi ghi file, nên lấy từ cấu hình là an toàn.
+        "item_id": listing_cfg.get("item_id"),
         "seller_id": item.get("shop_id"),
         "product_name": item.get("title"),
         "price": parse_price(item),
@@ -173,7 +218,7 @@ def save_record(record: dict) -> Path:
     # 2. Truy vết — record_<ts>.json khớp thẳng với raw_<ts>.json sinh ra nó,
     #    khỏi phải dò mtime để biết bản ghi này từ bản cào nào.
     ts = format_timestamp(datetime.fromisoformat(record["scraped_at"]))
-    out_path = STAGING_DIR / f"shopee_record_{record['sku_id']}_{ts}.json"
+    out_path = STAGING_DIR / f"shopee_record_{record['item_id']}_{ts}.json"
     out_path.write_text(json.dumps(
         record, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Đã lưu record: {out_path}")
@@ -181,7 +226,27 @@ def save_record(record: dict) -> Path:
 
 
 if __name__ == "__main__":
-    raw_path = find_latest_raw_file()
-    record = build_record(raw_path)
-    save_record(record)
-    print(json.dumps(record, indent=2, ensure_ascii=False))
+    # Chạy transform độc lập trên bản cào mới nhất của TỪNG LISTING, không phải
+    # trên đúng một file — nếu không thì chạy tay lại tái hiện đúng cái bug
+    # "N-1 listing bị bỏ rơi" mà find_latest_raw_file(item_id) vừa dẹp.
+    #
+    # Mỗi listing một khối try riêng, cùng lý do như trong fetch_all_listings():
+    # một listing chưa có file raw (hôm nay bị chặn) sẽ ném FileNotFoundError,
+    # và nếu không cô lập thì nó giết luôn các listing phía sau vốn có file
+    # hoàn toàn lành — đúng cái kiểu mất dữ liệu mà cả file này đang chống.
+    _failures = {}
+    for _listing in load_source_listings("shopee"):
+        _label = listing_label(_listing)
+        try:
+            _record = build_record(
+                find_latest_raw_file(str(_listing["item_id"])), _listing)
+            save_record(_record)
+            print(json.dumps(_record, indent=2, ensure_ascii=False))
+        except Exception as _exc:
+            _failures[_label] = f"{type(_exc).__name__}: {_exc}"
+            logger.warning("Không đóng gói được %s: %s", _label, _exc)
+
+    if _failures:
+        raise SystemExit(
+            "Có listing không đóng gói được: "
+            + "; ".join(f"{k}: {v}" for k, v in _failures.items()))

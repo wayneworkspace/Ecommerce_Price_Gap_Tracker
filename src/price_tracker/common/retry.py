@@ -20,7 +20,7 @@ def shopee_scrape_retry(*retryable_exceptions):
 
     Cách dùng:
         @shopee_scrape_retry(PWError, FetchFailedError)
-        def fetch_raw():
+        def fetch_one_listing(browser, listing_cfg):
             ...
     """
     if not retryable_exceptions:

@@ -16,18 +16,31 @@ from price_tracker.sources.shopee.transform import build_record
 RAW_PRICE_489K = 48_900_000_000
 VND_489K = 489_000.0
 
+# Cấu hình listing giả, đúng khuôn config/skus.yaml sinh ra. build_record() cần
+# nó vì `sku` và `is_official` KHÔNG có trong payload Shopee — chúng đến từ
+# config, và `sku` chính là khoá join tới reference_price ở mart layer.
+LISTING_CFG = {
+    "sku": "G102-LIGHTSYNC",
+    "name": "Logitech G102 Lightsync",
+    "reference_price": 489_000,
+    "shop_id": "52679373",
+    "item_id": "6765591429",
+    "is_official": True,
+}
 
-def _write_fake_raw(tmp_path, item: dict, url: str | None = None) -> Path:
+
+def _write_fake_raw(tmp_path, item: dict, url: str | None = None,
+                    name: str = "shopee_raw_6765591429_20260820T035111Z.json") -> Path:
     """Tạo 1 file JSON giả, đúng cấu trúc raw thật Shopee trả về
     (raw['data']['data']['item']), để test build_record() mà không
-    cần chạy fetch_raw.py cào thật."""
+    cần chạy extract.py cào thật."""
     fake_raw = {"data": {"data": {"item": item}}}
     if url is not None:
         fake_raw["url"] = url
 
     # Tên phải theo quy ước thật: build_record() suy thời điểm cào từ đây
     # khi envelope chưa có scraped_at (file cào bằng bản code cũ).
-    raw_path = tmp_path / "shopee_raw_6765591429_20260820T035111Z.json"
+    raw_path = tmp_path / name
     raw_path.write_text(json.dumps(
         fake_raw, ensure_ascii=False), encoding="utf-8")
     return raw_path
@@ -46,9 +59,13 @@ def test_build_record_maps_fields_correctly(tmp_path):
         url="https://shopee.vn/product/52679373/6765591429",
     )
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
 
-    assert record["sku_id"] == 6765591429
+    # item_id lấy từ CẤU HÌNH (chuỗi), không phải từ payload (số) — xem
+    # comment trong build_record: payload thiếu field này thì tên file
+    # staging thành shopee_record_None_<ts>.json và hai listing đè nhau.
+    assert record["item_id"] == "6765591429"
+    assert record["source"] == "shopee"
     assert record["seller_id"] == 52679373
     assert record["product_name"] == "Chuột gaming Logitech G102"
     assert record["price"] == VND_489K
@@ -68,7 +85,7 @@ def test_build_record_falls_back_to_price_min_when_price_is_none(tmp_path):
         },
     )
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
 
     assert record["price"] == VND_489K
 
@@ -90,7 +107,7 @@ def test_build_record_returns_none_when_price_and_price_min_missing(tmp_path, ca
         },
     )
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
 
     assert record["price"] is None
     assert any(r.levelname == "WARNING" for r in caplog.records), \
@@ -114,7 +131,7 @@ def test_build_record_returns_none_when_price_is_not_a_number(tmp_path, caplog):
         },
     )
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
 
     assert record["price"] is None
     assert any(r.levelname == "WARNING" for r in caplog.records)
@@ -137,7 +154,7 @@ def test_build_record_keeps_a_genuine_zero_price(tmp_path):
         },
     )
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
 
     assert record["price"] == 0.0
     assert record["price"] is not None
@@ -188,7 +205,7 @@ def test_find_latest_raw_file_skips_a_poisoned_newest_file(tmp_path, monkeypatch
     _write_raw_file(tmp_path, "shopee_raw_1_new.json",
                     {"error": 1, "error_msg": "server busy", "data": None}, mtime=2000)
 
-    chosen = transform_module.find_latest_raw_file()
+    chosen = transform_module.find_latest_raw_file("1")
 
     assert chosen.name == "shopee_raw_1_old.json"
     # caplog.text la log da format san — kiem tren do thay vi tu ghep %-format
@@ -204,7 +221,7 @@ def test_find_latest_raw_file_skips_unparseable_json(tmp_path, monkeypatch):
     _write_raw_file(tmp_path, "shopee_raw_1_broken.json",
                     "{ day khong phai JSON", mtime=2000)
 
-    assert transform_module.find_latest_raw_file().name == "shopee_raw_1_old.json"
+    assert transform_module.find_latest_raw_file("1").name == "shopee_raw_1_old.json"
 
 
 def test_find_latest_raw_file_reports_how_many_it_skipped(tmp_path, monkeypatch):
@@ -217,7 +234,7 @@ def test_find_latest_raw_file_reports_how_many_it_skipped(tmp_path, monkeypatch)
     _write_raw_file(tmp_path, "shopee_raw_1_b.json", "rac", mtime=2000)
 
     with pytest.raises(FileNotFoundError) as excinfo:
-        transform_module.find_latest_raw_file()
+        transform_module.find_latest_raw_file("1")
 
     msg = str(excinfo.value)
     assert "2" in msg
@@ -228,7 +245,7 @@ def test_find_latest_raw_file_still_reports_an_empty_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(transform_module, "RAW_DIR", tmp_path)
 
     with pytest.raises(FileNotFoundError):
-        transform_module.find_latest_raw_file()
+        transform_module.find_latest_raw_file("1")
 
 
 def test_build_record_gives_a_clear_error_on_a_poisoned_file(tmp_path):
@@ -239,7 +256,7 @@ def test_build_record_gives_a_clear_error_on_a_poisoned_file(tmp_path):
                                       "data": None}, "url": "x"}), encoding="utf-8")
 
     with pytest.raises(ValueError) as excinfo:
-        build_record(p)
+        build_record(p, LISTING_CFG)
 
     assert "poisoned.json" in str(excinfo.value)
 
@@ -262,7 +279,7 @@ def test_find_latest_raw_file_skips_a_file_with_broken_utf8(tmp_path, monkeypatc
     truncated.write_bytes(body[:-3] + b"\xe1\xba")   # cắt giữa ký tự nhiều byte
     os.utime(truncated, (2000, 2000))
 
-    assert transform_module.find_latest_raw_file().name == "shopee_raw_1_old.json"
+    assert transform_module.find_latest_raw_file("1").name == "shopee_raw_1_old.json"
 
 
 def test_find_latest_raw_file_accepts_an_old_bare_payload_file(tmp_path, monkeypatch):
@@ -274,7 +291,7 @@ def test_find_latest_raw_file_accepts_an_old_bare_payload_file(tmp_path, monkeyp
                                 "data": {"item": HEALTHY_ITEM}}), encoding="utf-8")
     os.utime(bare, (2000, 2000))
 
-    assert transform_module.find_latest_raw_file().name == "shopee_raw_1_bare.json"
+    assert transform_module.find_latest_raw_file("1").name == "shopee_raw_1_bare.json"
 
 
 def test_build_record_reads_an_old_bare_payload_file(tmp_path):
@@ -282,9 +299,13 @@ def test_build_record_reads_an_old_bare_payload_file(tmp_path):
     p.write_text(json.dumps({"bff_meta": {}, "error": None, "error_msg": None,
                              "data": {"item": HEALTHY_ITEM}}), encoding="utf-8")
 
-    record = build_record(p)
+    record = build_record(p, LISTING_CFG)
 
-    assert record["sku_id"] == 6765591429
+    # item_id lấy từ CẤU HÌNH (chuỗi), không phải từ payload (số) — xem
+    # comment trong build_record: payload thiếu field này thì tên file
+    # staging thành shopee_record_None_<ts>.json và hai listing đè nhau.
+    assert record["item_id"] == "6765591429"
+    assert record["source"] == "shopee"
     assert record["price"] == VND_489K
 
 
@@ -325,7 +346,7 @@ def test_build_record_takes_scraped_at_from_the_envelope(tmp_path):
         tmp_path, "shopee_raw_6765591429_20260820T035111Z.json",
         scraped_at=SCRAPED_AT_IN_FILE)
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
 
     assert record["scraped_at"] == SCRAPED_AT_IN_FILE
 
@@ -340,7 +361,7 @@ def test_build_record_falls_back_to_the_filename_timestamp(tmp_path):
         tmp_path, "shopee_raw_6765591429_20260820T035111Z.json",
         scraped_at=None)
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
 
     assert record["scraped_at"] == SCRAPED_AT_IN_FILE
 
@@ -351,7 +372,7 @@ def test_build_record_does_not_stamp_an_old_file_with_today(tmp_path):
         tmp_path, "shopee_raw_6765591429_20260820T035111Z.json",
         scraped_at=None)
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
     today = datetime.now(timezone.utc).date().isoformat()
 
     assert not record["scraped_at"].startswith(today)
@@ -368,7 +389,7 @@ def test_build_record_refuses_a_file_with_no_derivable_scrape_time(tmp_path):
                                 scraped_at=None)
 
     with pytest.raises(ValueError, match="thời điểm cào"):
-        build_record(raw_path)
+        build_record(raw_path, LISTING_CFG)
 
 
 def test_build_record_ignores_a_garbage_envelope_timestamp(tmp_path):
@@ -381,7 +402,7 @@ def test_build_record_ignores_a_garbage_envelope_timestamp(tmp_path):
         tmp_path, "shopee_raw_6765591429_20260820T035111Z.json",
         scraped_at="hôm qua lúc nào đó")
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
 
     assert record["scraped_at"] == SCRAPED_AT_IN_FILE
 
@@ -392,7 +413,7 @@ def test_build_record_normalises_a_z_suffix_timestamp(tmp_path):
         tmp_path, "shopee_raw_6765591429_20260820T035111Z.json",
         scraped_at="2026-08-20T03:51:11Z")
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
 
     assert record["scraped_at"] == SCRAPED_AT_IN_FILE
 
@@ -409,10 +430,128 @@ def test_save_record_is_idempotent_for_the_same_scrape(tmp_path, monkeypatch):
         tmp_path, "shopee_raw_6765591429_20260820T035111Z.json",
         scraped_at=SCRAPED_AT_IN_FILE)
 
-    record = build_record(raw_path)
+    record = build_record(raw_path, LISTING_CFG)
     first = transform_module.save_record(record)
-    second = transform_module.save_record(build_record(raw_path))
+    second = transform_module.save_record(build_record(raw_path, LISTING_CFG))
 
     assert first == second
     assert len(list(tmp_path.glob("shopee_record_*.json"))) == 1
     assert "20260820T035111Z" in first.name
+
+
+def test_find_latest_raw_file_only_looks_at_the_requested_sku(tmp_path, monkeypatch):
+    """Bug lộ ngay khi có SKU thứ 2: glob shopee_raw_*.json vơ hết mọi SKU rồi
+    trả đúng MỘT file mới nhất, nên N-1 SKU bị bỏ rơi im lặng — transform chạy
+    xong, báo thành công, mà chỉ có 1 record."""
+    monkeypatch.setattr(transform_module, "RAW_DIR", tmp_path)
+
+    _write_raw_file(tmp_path, "shopee_raw_111_old.json",
+                    {"error": None, "data": {"item": HEALTHY_ITEM}}, mtime=1000)
+    # SKU khác, file MỚI HƠN — không được phép lọt vào kết quả của SKU 111
+    _write_raw_file(tmp_path, "shopee_raw_222_new.json",
+                    {"error": None, "data": {"item": HEALTHY_ITEM}}, mtime=5000)
+
+    assert transform_module.find_latest_raw_file("111").name == "shopee_raw_111_old.json"
+    assert transform_module.find_latest_raw_file("222").name == "shopee_raw_222_new.json"
+
+
+def test_find_latest_raw_file_message_names_the_sku_when_it_finds_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(transform_module, "RAW_DIR", tmp_path)
+
+    _write_raw_file(tmp_path, "shopee_raw_222_new.json",
+                    {"error": None, "data": {"item": HEALTHY_ITEM}}, mtime=5000)
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        transform_module.find_latest_raw_file("111")
+
+    assert "111" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Hai tầng danh tính trong record — thứ mart layer sống nhờ.
+# ---------------------------------------------------------------------------
+
+def test_build_record_carries_the_logical_sku_as_the_join_key(tmp_path):
+    """`sku` phải đi xuống record, nếu không mart không join được reference_price.
+
+    Nhiều người bán rao cùng một sản phẩm, mỗi listing một item_id khác nhau.
+    reference_price thì gắn với SKU logic. Thiếu cột `sku` là thiếu đường nối
+    giữa hai thứ đó — tức không tính được price_gap_pct, mất toàn bộ mục đích
+    của dự án."""
+    raw_path = _write_fake_raw(tmp_path, item={"item_id": 6765591429,
+                                               "shop_id": 52679373,
+                                               "title": "G102",
+                                               "price": RAW_PRICE_489K})
+
+    record = build_record(raw_path, LISTING_CFG)
+
+    assert record["sku"] == "G102-LIGHTSYNC"
+    assert record["item_id"] == "6765591429", "item_id là mã listing trên sàn, lấy từ config"
+    assert record["seller_id"] == 52679373
+
+
+def test_build_record_carries_is_official_from_config(tmp_path):
+    """is_official không có trong payload Shopee — thiếu nó thì mart không phân
+    biệt nổi giá chính hãng với giá người bán khác, đúng câu hỏi cần trả lời."""
+    raw_path = _write_fake_raw(tmp_path, item={"item_id": 1, "shop_id": 2,
+                                               "title": "x",
+                                               "price": RAW_PRICE_489K})
+
+    reseller_cfg = {**LISTING_CFG, "item_id": "26201330261",
+                    "shop_id": "1256164758", "is_official": False}
+
+    assert build_record(raw_path, LISTING_CFG)["is_official"] is True
+    assert build_record(raw_path, reseller_cfg)["is_official"] is False
+
+
+def test_two_listings_of_one_sku_share_the_join_key_but_differ_on_listing(tmp_path):
+    """Đây chính là hình dạng dữ liệu mà price gap dựa vào: cùng `sku`, khác
+    `item_id`/`seller_id`, một cái chính hãng một cái không."""
+    official_raw = _write_fake_raw(tmp_path, item={"item_id": 6765591429,
+                                                   "shop_id": 52679373,
+                                                   "title": "official",
+                                                   "price": RAW_PRICE_489K},
+                                   name="shopee_raw_6765591429_20260820T035111Z.json")
+    reseller_raw = _write_fake_raw(tmp_path, item={"item_id": 26201330261,
+                                                    "shop_id": 1256164758,
+                                                    "title": "reseller",
+                                                    "price": 45_000_000_000},
+                                   name="shopee_raw_26201330261_20260820T035111Z.json")
+    reseller_cfg = {**LISTING_CFG, "item_id": "26201330261",
+                    "shop_id": "1256164758", "is_official": False}
+
+    a = build_record(official_raw, LISTING_CFG)
+    b = build_record(reseller_raw, reseller_cfg)
+
+    assert a["sku"] == b["sku"], "Cùng một sản phẩm logic"
+    assert a["item_id"] == "6765591429" and b["item_id"] == "26201330261"
+    assert a["item_id"] != b["item_id"], "Khác tin đăng"
+    assert a["seller_id"] != b["seller_id"], "Khác người bán"
+    assert a["price"] != b["price"]
+
+
+def test_save_record_names_the_file_after_the_listing(tmp_path, monkeypatch):
+    """Tên file staging phải theo item_id: hai listing của cùng một SKU mà đặt
+    tên theo sku thì cái sau ghi đè cái trước, mất luôn một nửa dữ liệu."""
+    monkeypatch.setattr(transform_module, "STAGING_DIR", tmp_path)
+
+    out = transform_module.save_record({
+        "sku": "G102-LIGHTSYNC", "item_id": 26201330261,
+        "scraped_at": "2026-08-27T05:55:22+00:00"})
+
+    assert "26201330261" in out.name
+
+
+def test_build_record_never_leaves_item_id_empty_even_if_shopee_omits_it(tmp_path):
+    """Payload thiếu item_id không được làm record mất danh tính listing.
+
+    Nếu lấy item_id từ payload thì ca này ra None, và save_record đặt tên
+    shopee_record_None_<ts>.json — hai listing cào trong cùng một giây ghi đè
+    lên nhau, mất im lặng một nửa dữ liệu."""
+    raw_path = _write_fake_raw(tmp_path, item={"shop_id": 52679373,
+                                               "title": "thiếu item_id",
+                                               "price": RAW_PRICE_489K})
+
+    record = build_record(raw_path, LISTING_CFG)
+
+    assert record["item_id"] == "6765591429"
