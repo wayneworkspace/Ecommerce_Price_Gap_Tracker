@@ -40,7 +40,7 @@ This is not a "learn Airflow/dbt" exercise — the tools exist because the under
 
 ## Architecture
 
-(architecture.png)
+![Architecture — scrape to Power BI](architecture.png)
 
 > **Design note:** the diagram above shows the initial design with a dedicated "Orchestration Metadata Store" Postgres instance. That instance was cut in the current plan — Airflow already requires a metadata database to track DAG runs, so a second, separate Postgres for "orchestration logs" duplicates that without adding capability. The current plan runs a **single Postgres instance** with two schemas: `airflow` (orchestrator metadata) and `warehouse` (raw/staging/mart).
 
