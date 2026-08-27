@@ -1,6 +1,7 @@
 from price_tracker.config import RAW_DIR, require_user_data_dir
 from price_tracker.sources.shopee.settings import TARGET_ITEM_ID, PRODUCT_URL
 from price_tracker.common.retry import shopee_scrape_retry
+from price_tracker.sources.shopee.payload import find_item, describe_problem
 from patchright.sync_api import sync_playwright, Error as PWError
 from pathlib import Path
 from datetime import datetime, timezone
@@ -13,6 +14,12 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s:%(name)s:%(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Bằng chứng chẩn đoán thôi, không đáng chờ lâu: mặc định Playwright là 30s, mà
+# khối này chạy lại ở CẢ 3 lần retry -> đốt thêm 90s mỗi lần fetch hỏng.
+# Đặt cho CẢ content() lẫn screenshot(): chỉ chặn screenshot thì content()
+# vẫn tự do treo 30s, coi như chưa chặn được gì.
+DEBUG_CAPTURE_TIMEOUT_MS = 10_000
 
 GOTO_TIMEOUT_MS = 30_000
 RESPONSE_TIMEOUT_MS = 40_000
@@ -37,6 +44,31 @@ def extract_json_or_fail(response) -> dict:
         ) from exc
 
 
+def validate_payload_or_fail(payload: dict) -> dict:
+    """Kiểm payload có dùng được không, TRẢ VỀ item, ném FetchFailedError nếu không.
+
+    Đây là lỗ hổng thật của bản trước: extract_json_or_fail() chỉ đảm bảo body
+    PARSE được thành JSON. Nhưng khi bị chặn hoặc throttle, Shopee trả HTTP 200
+    kèm một JSON hoàn toàn hợp lệ dạng {"error": 1, "data": null} — parse ngon
+    lành, nên nó lọt qua và bị coi là thành công. Hậu quả dây chuyền:
+
+      - tenacity không retry, dù đây đúng là ca đáng retry nhất (chặn tạm thời);
+      - file độc được ghi vào data/raw/ và trở thành file mới nhất, nên
+        transform.py nhặt đúng nó cho MỌI lần chạy sau — hỏng một lần, hỏng mãi.
+
+    Gọi hàm này trong khối try của fetch_raw() là cố ý: FetchFailedError ném ra
+    sẽ rơi vào đúng except sẵn có, nên tự động được lưu bằng chứng debug (nhìn
+    HTML là biết ngay bị tường login hay captcha) rồi mới ném tiếp cho tenacity.
+    Và vì ném trước khi tới lệnh ghi file, không có gì ra đĩa cả.
+    """
+    item = find_item(payload)
+    if item is None:
+        raise FetchFailedError(
+            f"Shopee trả JSON hợp lệ nhưng không dùng được — {describe_problem(payload)}"
+        )
+    return item
+
+
 def dump_debug_evidence(page, debug_dir: Path | None = None) -> None:
 
     if debug_dir is None:
@@ -47,14 +79,15 @@ def dump_debug_evidence(page, debug_dir: Path | None = None) -> None:
     try:
         debug_dir.mkdir(parents=True, exist_ok=True)
         (debug_dir / f"fail_{ts}.html").write_text(
-            page.content(), encoding="utf-8")
+            page.content(timeout=DEBUG_CAPTURE_TIMEOUT_MS), encoding="utf-8")
         logger.info("Đã lưu HTML debug -> %s", debug_dir / f"fail_{ts}.html")
     except Exception as exc:
         logger.warning("Không lưu được HTML debug (%s: %s)",
                        type(exc).__name__, exc)
 
     try:
-        page.screenshot(path=str(debug_dir / f"fail_{ts}.png"), full_page=True)
+        page.screenshot(path=str(debug_dir / f"fail_{ts}.png"), full_page=True,
+                        timeout=DEBUG_CAPTURE_TIMEOUT_MS)
         logger.info("Đã lưu ảnh debug -> %s", debug_dir / f"fail_{ts}.png")
     except Exception as exc:
         logger.warning("Không chụp được ảnh debug (%s: %s)",
@@ -92,6 +125,15 @@ def fetch_raw() -> Path:
             logger.info("Captured API response: %s", response.url)
 
             data = extract_json_or_fail(response)
+
+            # Cân nhắc rồi bỏ: khôi phục guard content-type == application/json
+            # mà bản trước từng có. Nó không chặn thêm được ca nào — body không
+            # phải JSON thì extract_json_or_fail() đã ném, còn JSON sai hình
+            # dạng thì validate_payload_or_fail() bắt. Nó chỉ có thể chặn một
+            # response vừa có content-type lạ, vừa parse ra JSON, vừa đúng shape
+            # — tức là dữ liệu vẫn dùng được. Thêm một lớp không chặn thêm gì
+            # chỉ làm code dài ra.
+            validate_payload_or_fail(data)
 
         except (PWError, FetchFailedError) as exc:
             logger.warning("Lần thử này fail: %s", exc)

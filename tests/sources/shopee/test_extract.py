@@ -15,6 +15,7 @@ from price_tracker.sources.shopee.extract import (
     FetchFailedError,
     extract_json_or_fail,
     dump_debug_evidence,
+    validate_payload_or_fail,
     fetch_raw,
 )
 
@@ -109,3 +110,24 @@ def test_fetch_raw_retry_covers_the_exceptions_it_actually_raises():
     assert retry_config.stop.max_attempt_number == 3
     assert FetchFailedError in retry_config.retry.exception_types
     assert PWError in retry_config.retry.exception_types
+
+
+def test_validate_payload_or_fail_passes_a_healthy_payload():
+    payload = {"error": None, "data": {"item": {"item_id": 6765591429}}}
+
+    assert validate_payload_or_fail(payload) == {"item_id": 6765591429}
+
+
+def test_validate_payload_or_fail_rejects_shopee_error_payload():
+    """Lớp 1 của C1: chặn TRƯỚC khi ghi ra data/raw/.
+
+    Phải là FetchFailedError để tenacity retry — đây đúng là ca đáng retry
+    nhất (bị chặn/throttle tạm thời), mà bản cũ lại coi là thành công."""
+    payload = {"error": 1, "error_msg": "server busy", "data": None}
+
+    with pytest.raises(FetchFailedError) as excinfo:
+        validate_payload_or_fail(payload)
+
+    msg = str(excinfo.value)
+    assert "1" in msg and "server busy" in msg, \
+        "Phải kèm error/error_msg thật của Shopee, đừng nuốt mất manh mối"

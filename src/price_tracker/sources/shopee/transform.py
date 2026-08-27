@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from price_tracker.config import RAW_DIR, STAGING_DIR
+from price_tracker.sources.shopee.payload import find_item_in_raw, describe_raw_problem
 
 logger = logging.getLogger(__name__)
 
@@ -14,12 +15,57 @@ SHOPEE_PRICE_SCALE = 100_000
 
 
 def find_latest_raw_file() -> Path:
+    """Trả file raw mới nhất còn DÙNG ĐƯỢC — không phải file mới nhất.
+
+    Khác biệt đó là cả vấn đề. Bản cũ lấy thẳng file mtime lớn nhất, nên chỉ cần
+    một file hỏng lọt vào data/raw/ là nó vĩnh viễn là file được chọn, và mọi
+    lần chạy transform sau đó đều vỡ ở cùng một chỗ. Hỏng một lần, hỏng mãi, mà
+    cách sửa duy nhất là tự vào xoá file bằng tay — nếu đoán ra được nguyên nhân.
+
+    Giờ duyệt từ mới về cũ và bỏ qua file không đọc được: chỉ cần còn một bản
+    cào lành là pipeline chạy tiếp được. Mỗi file bị bỏ qua đều log warning kèm
+    tên và lý do, để còn biết đường đi dọn.
+    """
     files = sorted(RAW_DIR.glob("shopee_raw_*.json"),
-                   key=lambda p: p.stat().st_mtime)
+                   key=lambda p: p.stat().st_mtime, reverse=True)
     if not files:
         raise FileNotFoundError(
-            "Không tìm thấy file raw nào — chạy fetch_raw.py trước.")
-    return files[-1]
+            f"Không tìm thấy file raw nào trong {RAW_DIR} — chạy extract trước.")
+
+    skipped: list[str] = []
+    for path in files:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        # UnicodeDecodeError phải có mặt: read_text(encoding="utf-8") ném nó
+        # TRƯỚC khi json.loads kịp chạy, và nó không phải OSError cũng không
+        # phải JSONDecodeError. extract.py ghi ensure_ascii=False nên file đầy
+        # ký tự nhiều byte — chỉ cần Ctrl-C hay đầy đĩa giữa lúc ghi là dính,
+        # và thế là rơi lại đúng bẫy "hỏng một lần, hỏng mãi".
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+        else:
+            if find_item_in_raw(raw) is not None:
+                if skipped:
+                    # Cảnh báo phải nói rõ hệ quả, không chỉ nói "đã bỏ qua":
+                    # build_record() đóng dấu scraped_at = thời điểm CHẠY chứ
+                    # không phải thời điểm CÀO, nên record sinh từ file cũ mang
+                    # giá cũ với dấu thời gian hôm nay. Nếu Shopee chặn mình cả
+                    # tuần thì chuỗi giá trông phẳng lì mà không ai biết là giả.
+                    # Tên file có sẵn dấu thời gian UTC lúc cào — soi vào đó.
+                    logger.warning(
+                        "Đã bỏ qua %d file raw hỏng, đang dùng bản cào CŨ HƠN: %s. "
+                        "Record sinh ra sẽ mang GIÁ CŨ — kiểm tra lại nếu chuỗi giá bỗng phẳng.",
+                        len(skipped), path.name)
+                return path
+            reason = describe_raw_problem(raw)
+
+        skipped.append(path.name)
+        logger.warning("Bỏ qua file raw hỏng %s — %s", path.name, reason)
+
+    raise FileNotFoundError(
+        f"Có {len(files)} file raw trong {RAW_DIR} nhưng không file nào dùng được. "
+        f"Đã bỏ qua: {', '.join(skipped)}. Chạy lại extract để lấy bản mới."
+    )
 
 
 def parse_price(item: dict) -> float | None:
@@ -55,7 +101,16 @@ def parse_price(item: dict) -> float | None:
 
 def build_record(raw_path: Path) -> dict:
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
-    item = raw["data"]["data"]["item"]
+
+    # Không index thẳng raw["data"]["data"]["item"] nữa: với file độc thì nó nổ
+    # TypeError: 'NoneType' object is not subscriptable — đúng nhưng không nói
+    # được file nào hỏng hay hỏng vì sao. Đi qua find_item() để lỗi chỉ thẳng
+    # vào file cần xoá.
+    item = find_item_in_raw(raw)
+    if item is None:
+        raise ValueError(
+            f"File raw {raw_path.name} không dùng được — {describe_raw_problem(raw)}"
+        )
 
     return {
         "sku_id": item.get("item_id"),

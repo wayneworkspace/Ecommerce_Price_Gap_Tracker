@@ -23,6 +23,15 @@ def shopee_scrape_retry(*retryable_exceptions):
         def fetch_raw():
             ...
     """
+    if not retryable_exceptions:
+        # tenacity nhận retry_if_exception_type(()) mà không phàn nàn: decorator
+        # trông như đã gắn nhưng không bao giờ retry cái gì. Gãy to và sớm ở đây
+        # còn hơn để lộ ra lúc production đang cần retry nhất.
+        raise TypeError(
+            "shopee_scrape_retry() cần ít nhất 1 loại exception để retry, "
+            "ví dụ @shopee_scrape_retry(PWError, FetchFailedError)."
+        )
+
     return retry(
         reraise=True,
         stop=stop_after_attempt(3),
