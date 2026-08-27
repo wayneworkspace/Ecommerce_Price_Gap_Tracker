@@ -13,6 +13,26 @@ Shopee Profile/
 docs/decisions/
 docs/PROJECT_STRUCTURE.md
 
+# Credential — repo này PUBLIC.
+#
+# Key GCP rò rỉ lên GitHub bị bot quét thấy trong vài phút và dùng để đào tiền
+# trên thẻ của mình. Cách phòng chắc nhất KHÔNG phải mấy dòng dưới đây, mà là
+# không bao giờ tải file key về: dùng `gcloud auth application-default login`,
+# credential nằm ở %APPDATA%\gcloud\, ngoài repo. Mấy luật này là lớp thứ hai,
+# phòng khi sau này buộc phải dùng key (ví dụ Airflow chạy trong container).
+*-key.json
+*_key.json
+*-sa.json
+service-account*.json
+service_account*.json
+credentials*.json
+client_secret*.json
+gcp-*.json
+application_default_credentials.json
+.gcp/
+*.pem
+*.p12
+
 # Build artifact của package cài bằng pip install -e .
 *.egg-info/
 build/
