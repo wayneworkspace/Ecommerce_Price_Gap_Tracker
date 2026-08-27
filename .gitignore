@@ -1,7 +1,9 @@
 data/
 .venv
 __pycache__/
+.pytest_cache/
 .env
 shopee_page_dump.html
 shopee_cookies.json
 Shopee Profile/
+.claude

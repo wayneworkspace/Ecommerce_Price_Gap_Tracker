@@ -1,9 +1,9 @@
 from patchright.sync_api import sync_playwright
-from config import USER_DATA_DIR
+from config import require_user_data_dir
 
 with sync_playwright() as p:
     browser = p.chromium.launch_persistent_context(
-        user_data_dir=USER_DATA_DIR,
+        user_data_dir=require_user_data_dir(),
         channel="chrome",
         headless=False,
     )
