@@ -1,7 +1,8 @@
 from price_tracker.config import RAW_DIR, require_user_data_dir
 from price_tracker.sources.shopee.settings import TARGET_ITEM_ID, PRODUCT_URL
 from price_tracker.common.retry import shopee_scrape_retry
-from price_tracker.sources.shopee.payload import find_item, describe_problem
+from price_tracker.sources.shopee.payload import (
+    find_item, describe_problem, format_timestamp)
 from patchright.sync_api import sync_playwright, Error as PWError
 from pathlib import Path
 from datetime import datetime, timezone
@@ -74,7 +75,7 @@ def dump_debug_evidence(page, debug_dir: Path | None = None) -> None:
     if debug_dir is None:
         debug_dir = RAW_DIR.parent / "debug"
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = format_timestamp(datetime.now(timezone.utc))
 
     try:
         debug_dir.mkdir(parents=True, exist_ok=True)
@@ -154,11 +155,19 @@ def fetch_raw() -> Path:
                 logger.warning("Đóng browser lỗi (%s: %s)",
                                type(exc).__name__, exc)
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out_path = RAW_DIR / f"shopee_raw_{TARGET_ITEM_ID}_{ts}.json"
+    # MỘT lời gọi now() duy nhất, dùng cho cả tên file lẫn field scraped_at.
+    # Gọi hai lần thì hai giá trị lệch nhau vài mili-giây — nhỏ, nhưng nó phá
+    # đúng cái bất biến mà transform dựa vào: tên file và envelope phải nói
+    # cùng một thời điểm, vì transform đọc envelope trước rồi mới tới tên file.
+    scraped_at = datetime.now(timezone.utc)
+    out_path = RAW_DIR / \
+        f"shopee_raw_{TARGET_ITEM_ID}_{format_timestamp(scraped_at)}.json"
 
+    # scraped_at nằm trong file chứ không chỉ ở tên file: tên file có thể bị
+    # đổi khi copy/backup, còn nội dung thì đi đâu cũng mang theo thời điểm cào.
     out_path.write_text(
-        json.dumps({"data": data, "url": PRODUCT_URL},
+        json.dumps({"data": data, "url": PRODUCT_URL,
+                    "scraped_at": scraped_at.isoformat()},
                    ensure_ascii=False, indent=2),
         encoding="utf-8",
     )

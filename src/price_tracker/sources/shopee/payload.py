@@ -1,4 +1,4 @@
-"""Hình dạng của một payload Shopee trả về, và thế nào là "dùng được".
+"""Hợp đồng về file raw: payload Shopee trông thế nào, và tên file mang gì.
 
 Tách riêng vì hai chỗ cần đúng kiến thức này mà không được phụ thuộc nhau:
 extract.py (chặn trước khi ghi ra đĩa) và transform.py (bỏ qua file đã hỏng).
@@ -9,7 +9,72 @@ Khuôn thật, lấy từ file trong data/raw/:
 
     {"bff_meta": {...}, "error": null, "error_msg": null,
      "data": {"item": {...}, "account": {...}, ...}}
+
+extract.py bọc nó thành envelope trước khi ghi:
+
+    {"data": <payload trên>, "url": ..., "scraped_at": "2026-08-27T05:55:22Z"}
 """
+import re
+from datetime import datetime, timezone
+
+# Dấu thời gian trong TÊN file raw: shopee_raw_<item_id>_20260827T055522Z.json
+# extract.py dùng để đặt tên, transform.py dùng để đọc ngược ra thời điểm cào
+# với file cũ chưa có scraped_at trong envelope. Hai bên phải dùng CHUNG một
+# hằng số, lệch nhau là tên file ghi một kiểu, đọc một kiểu.
+RAW_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+_RAW_TIMESTAMP_PATTERN = re.compile(r"(\d{8}T\d{6}Z)")
+
+
+def format_timestamp(moment: datetime) -> str:
+    """Đóng dấu thời gian để đặt tên file. Luôn quy về UTC trước."""
+    return moment.astimezone(timezone.utc).strftime(RAW_TIMESTAMP_FORMAT)
+
+
+def find_scraped_at(raw) -> str | None:
+    """Đọc scraped_at từ envelope, None nếu không có hoặc không đọc được.
+
+    Có kiểm tra parse được chứ không chỉ kiểm tra "là chuỗi khác rỗng": một
+    giá trị rác vẫn là chuỗi, và nó sẽ đi thẳng vào record rồi xuống warehouse.
+    Trả None khi rác để tụt xuống nguồn kế tiếp (tên file) — file bị sửa tay
+    hay hỏng phần envelope thì tên file thường vẫn còn nguyên.
+
+    Trả lại dạng đã chuẩn hoá để mọi record dùng chung một định dạng, dù
+    envelope ghi kiểu 'Z' hay '+00:00'.
+    """
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get("scraped_at")
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    # Thiếu tzinfo thì coi là UTC: extract.py luôn ghi kèm offset, nên file
+    # không có offset là file lạ — nhưng đoán UTC vẫn đúng hơn là đoán giờ máy
+    # đang chạy transform, vì máy đó có thể ở múi giờ khác máy đã cào.
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).isoformat()
+
+
+def scraped_at_from_filename(name: str) -> str | None:
+    """Suy ra thời điểm cào từ tên file, None nếu tên không theo quy ước.
+
+    Dùng cho file cào trước khi envelope có scraped_at — data/raw/ đang có
+    file thật thuộc loại đó, coi chúng là hỏng là tự vứt dữ liệu còn tốt.
+
+    Tìm bằng regex chứ không cắt chuỗi theo vị trí: tên file có nhiều dấu `_`
+    và cắt theo thứ tự sẽ im lặng nhận nhầm khi quy ước đặt tên đổi.
+    """
+    match = _RAW_TIMESTAMP_PATTERN.search(name)
+    if match is None:
+        return None
+    try:
+        moment = datetime.strptime(match.group(1), RAW_TIMESTAMP_FORMAT)
+    except ValueError:
+        return None
+    return moment.replace(tzinfo=timezone.utc).isoformat()
 
 
 def find_item(payload) -> dict | None:
