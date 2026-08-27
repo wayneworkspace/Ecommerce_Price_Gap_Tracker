@@ -7,6 +7,11 @@ shopee_page_dump.html
 shopee_cookies.json
 Shopee Profile/
 .claude
+# Ghi chú cá nhân: giữ ở máy, không đưa lên GitHub.
+# Thư mục thật tên "decisions" (số nhiều) — viết thiếu chữ s là luật không khớp
+# và file lại lọt lên repo.
+docs/decisions/
+docs/PROJECT_STRUCTURE.md
 
 # Build artifact của package cài bằng pip install -e .
 *.egg-info/
