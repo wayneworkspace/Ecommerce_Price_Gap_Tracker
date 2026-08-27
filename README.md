@@ -91,14 +91,53 @@ No Kafka, Spark, or object storage — data volume does not justify them, and ad
 
 ## Setup Instructions
 
+Weeks 1-2 of the roadmap cover the crawler only. Postgres, Docker Compose, dbt and Airflow arrive in weeks 3-6 and are **not** part of this setup yet.
+
 ```bash
-git clone <repo-url>
-cd logitech-price-integrity-monitor
-cp .env.example .env
-docker-compose up -d
+git clone https://github.com/wayneworkspace/Ecommerce_Price_Gap_Tracker.git
+cd Ecommerce_Price_Gap_Tracker
+
+pip install -e ".[crawler,dev]"   # crawler = patchright + tenacity, dev = pytest
+patchright install chrome         # real Chrome, not bundled Chromium - see Issue 3
+
+cp .env.example .env              # then edit it, see the table below
 ```
 
-DAGs become visible in the Airflow UI at `localhost:8080`. Trigger `scrape_prices_dag` manually for a first run.
+`.env` has one required variable:
+
+| Variable | What it is | What breaks without it |
+|---|---|---|
+| `SHOPEE_USER_DATA_DIR` | Absolute path to the Chrome persistent-profile directory holding your logged-in Shopee session | The crawler raises before opening a browser. Shopee redirects anonymous sessions to a login wall, so there is no scrape without a session - see `docs/decisions/0004-persistent-context-thay-vi-export-cookie.md` |
+
+Log into that profile once, by hand:
+
+```bash
+python scripts/shopee_login.py
+```
+
+The script opens a real browser and waits. You log in yourself - including the captcha, if one appears - then press Enter. The session persists inside the profile directory, so this is a one-time step; repeat it only when the session expires.
+
+Run the pipeline:
+
+```bash
+price-tracker-shopee
+# equivalently: python -m price_tracker.sources.shopee.main
+```
+
+It writes the untouched API response to `data/raw/` and the mapped record to `data/staging/`. Which SKUs are scraped is configured in `config/skus.yaml`, not in code.
+
+Run the tests - they need neither network nor browser, and work without a `.env`:
+
+```bash
+pytest
+```
+
+### Not available yet
+
+| Step | Status |
+|---|---|
+| `docker-compose up -d` | Planned, weeks 3-4 |
+| Airflow UI at `localhost:8080`, triggering `scrape_prices_dag` | Planned, weeks 5-6 |
 
 ---
 
