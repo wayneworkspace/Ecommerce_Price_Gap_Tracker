@@ -1,6 +1,6 @@
 import json
-from fetch_raw import fetch_raw
-from build_record import build_record, save_record
+from price_tracker.sources.shopee.extract import fetch_raw
+from price_tracker.sources.shopee.transform import build_record, save_record
 
 
 def main():

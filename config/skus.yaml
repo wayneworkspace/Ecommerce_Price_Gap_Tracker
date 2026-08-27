@@ -1,0 +1,18 @@
+# Danh sách SKU cần theo dõi.
+#
+# Đây là DỮ LIỆU, không phải code: đổi SKU / thêm kênh chỉ sửa file này, không
+# đụng Python, không cần chạy lại test. Trước đây item_id và url bị hard-code
+# thẳng trong config.py — đi tiếp đường đó thì 3 SKU x 3 kênh = 9 biến nằm rải
+# rác trong code, mỗi lần đổi là một commit sửa code.
+#
+# reference_price: giá niêm yết chính hãng (VND). Để đây để dbt seed file này
+# thành bảng rồi join ra price_gap, khỏi phải nhét số vào trong model.
+
+- sku: G102-LIGHTSYNC
+  name: "Logitech G102 Lightsync"
+  reference_price: 489000
+  sources:
+    shopee:
+      item_id: "6765591429"
+      shop_id: "52679373"
+      url: "https://shopee.vn/Chu%E1%BB%99t-gaming-c%C3%B3-d%C3%A2y-Logitech-G102-Lightsync-T%C3%B9y-ch%E1%BB%89nh-RGB-6-n%C3%BAt-l%E1%BA%ADp-tr%C3%ACnh-nh%E1%BA%B9-i.52679373.6765591429"

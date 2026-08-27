@@ -7,3 +7,14 @@ shopee_page_dump.html
 shopee_cookies.json
 Shopee Profile/
 .claude
+
+# Build artifact của package cài bằng pip install -e .
+*.egg-info/
+build/
+dist/
+
+# dbt + Airflow (tuần 3-6)
+dbt/target/
+dbt/dbt_packages/
+airflow/logs/
+airflow.db

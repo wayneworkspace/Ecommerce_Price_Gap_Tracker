@@ -6,11 +6,11 @@
 
 Direct navigation via Playwright/Chromium:
 
-![Issue 1 - direct navigation via Chromium](Issue_image/Issue_1_Gotolinkwithchromium.jpg)
+![Issue 1 - direct navigation via Chromium](images/Issue_1_Gotolinkwithchromium.jpg)
 
 Same block reproduced on a real phone, different network (5G), no automation involved — rules out bot fingerprinting as the cause at this layer:
 
-![Issue 1 - same block on phone via 5G](Issue_image/Issue_1_Gotolinkwithphone.jpg)
+![Issue 1 - same block on phone via 5G](images/Issue_1_Gotolinkwithphone.jpg)
 
 **Reason:**
 - Shopee redirects any anonymous session (`is_logged_in=false`) straight to a login-wall page when navigating directly to a product detail URL.
@@ -38,7 +38,7 @@ Same block reproduced on a real phone, different network (5G), no automation inv
 
 **Evidence:**
 
-![Issue 3 - anti-bot captcha wall](Issue_image/Issue_3_CaptchaAntiBot.jpg)
+![Issue 3 - anti-bot captcha wall](images/Issue_3_CaptchaAntiBot.jpg)
 
 **Reason:**
 - Even with real Chrome (`channel="chrome"`), a brand-new persistent profile, and no prior automation history, the captcha still triggered — this time at the very first login attempt.
@@ -84,7 +84,7 @@ The rendered page showed the product title, images, and breadcrumb (server-rende
 
 Page rendered cleanly — title, images, breadcrumb, and logged-in account all correct — but the price box stayed an empty grey placeholder even after waiting 25 seconds:
 
-![Issue 5 - price widget stays empty after 25s wait](Issue_image/Issue_5_PriceNeverLoads.png)
+![Issue 5 - price widget stays empty after 25s wait](images/Issue_5_PriceNeverLoads.png)
 
 Console/page-error listeners (`page.on("console")`, `page.on("pageerror")`) were added to rule out a JS crash (the Issue 4 pattern) — no errors were logged, ruling that out.
 

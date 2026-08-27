@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import RAW_DIR, STAGING_DIR
+from price_tracker.config import RAW_DIR, STAGING_DIR
 
 logger = logging.getLogger(__name__)
 

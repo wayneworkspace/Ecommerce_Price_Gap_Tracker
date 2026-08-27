@@ -1,6 +1,0 @@
-patchright
-tenacity
-pytest
-pandas
-numpy
-python-dotenv

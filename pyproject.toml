@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "price-tracker"
+version = "0.1.0"
+description = "Theo dõi chênh lệch giá bán lẻ của cùng một SKU giữa các kênh thương mại điện tử"
+requires-python = ">=3.11"
+
+# Chỉ những thứ CẢ pipeline đều cần. Sàn version là bản đã chạy thật ở máy dev,
+# không đặt trần vì đây chưa phải thư viện phát hành cho ai khác dùng.
+dependencies = [
+    "python-dotenv>=1.2",   # đọc .env
+    "pyyaml>=6.0",          # đọc config/skus.yaml
+]
+
+[project.optional-dependencies]
+# Tách riêng để container nào chỉ chạy transform thì khỏi kéo cả Chrome về.
+crawler = [
+    "patchright>=1.62",     # fork Playwright vá ở tầng CDP — xem docs/issues.md Issue 4
+    "tenacity>=9.1",        # retry có backoff, dùng chung ở common/retry.py
+]
+dev = ["pytest>=8.0"]
+
+# Cài để chạy test: pip install -e ".[crawler,dev]"
+# (test_extract.py có import patchright nên cần cả extra crawler)
+
+[project.scripts]
+price-tracker-shopee = "price_tracker.sources.shopee.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# pythonpath để `pytest` chạy được ngay trên clone sạch, không bắt buộc phải
+# pip install -e . trước. Thay cho mẹo cũ: một file __init__.py rỗng trong
+# test_case/ chỉ để dụ pytest chèn thư mục cha vào sys.path.
+pythonpath = ["src"]

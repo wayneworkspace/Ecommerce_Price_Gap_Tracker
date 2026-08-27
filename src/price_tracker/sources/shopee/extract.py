@@ -1,5 +1,6 @@
-from config import RAW_DIR, TARGET_ITEM_ID, PRODUCT_URL, require_user_data_dir
-from retry import shopee_scrape_retry
+from price_tracker.config import RAW_DIR, require_user_data_dir
+from price_tracker.sources.shopee.settings import TARGET_ITEM_ID, PRODUCT_URL
+from price_tracker.common.retry import shopee_scrape_retry
 from patchright.sync_api import sync_playwright, Error as PWError
 from pathlib import Path
 from datetime import datetime, timezone
