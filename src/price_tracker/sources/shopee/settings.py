@@ -1,22 +1,24 @@
 """Shopee constants that hold for every SKU.
 
-Thứ chỉ riêng Shopee mới có, và KHÔNG phụ thuộc vào SKU nào.
+Things only Shopee has, and that do NOT depend on any particular SKU.
 
-Tách khỏi config.py chung để khi thêm TikTok/Logitech, mỗi nguồn có
-settings.py của riêng nó mà không ai giẫm chân ai.
+Kept out of the shared config.py so that when TikTok or Logitech is added,
+each source gets its own settings.py without stepping on the others.
 
-Trước đây file này còn ghim cứng TARGET_ITEM_ID/PRODUCT_URL của đúng một SKU,
-đọc từ skus.yaml ngay lúc import. Cách đó không lặp được: hằng số ở tầng module
-thì cả tiến trình chỉ có một giá trị, nên muốn cào SKU thứ hai là phải sửa code.
-Giờ cấu hình listing đi vào hàm dưới dạng tham số (xem extract.fetch_one_listing),
-đây chỉ giữ lại phần đúng với mọi SKU.
+This file used to hard-code TARGET_ITEM_ID/PRODUCT_URL for a single SKU, read
+from skus.yaml at import time. That does not scale: a module-level constant has
+exactly one value per process, so scraping a second SKU meant editing code.
+Listing config is now passed in as an argument (see extract.fetch_one_listing),
+and only the SKU-independent parts remain here.
 """
 
-# API nội bộ Shopee gọi để lấy giá. Bắt response của đúng đường dẫn này thay vì
-# đọc CSS selector — xem ADR 0002 và docs/issues.md Issue 5.
+# The internal Shopee API that returns the price. We capture the response of
+# this path instead of reading CSS selectors -- see ADR 0002 and
+# docs/issues.md Issue 5.
 PDP_API_PATH = "pdp/get_pc"
 
-# Tiền tố tên file raw. Dùng chung bởi extract.py (lúc ghi) và transform.py
-# (lúc glob tìm lại), nên phải nằm một chỗ: hai bên lệch nhau một ký tự là
-# transform không tìm thấy gì mà cũng chẳng có lỗi nào chỉ ra vì sao.
+# Raw filename prefix. Shared by extract.py (when writing) and transform.py
+# (when globbing for it back), so it has to live in one place: a one-character
+# drift between the two means transform finds nothing, with no error explaining
+# why.
 RAW_FILE_PREFIX = "shopee_raw"

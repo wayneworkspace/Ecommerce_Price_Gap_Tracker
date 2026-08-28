@@ -1,28 +1,30 @@
 """What a usable Shopee payload looks like, and what a raw filename carries.
 
-Hợp đồng về file raw: payload Shopee trông thế nào, và tên file mang gì.
+The raw-file contract: the shape of a Shopee payload, and what the filename
+carries.
 
-Tách riêng vì hai chỗ cần đúng kiến thức này mà không được phụ thuộc nhau:
-extract.py (chặn trước khi ghi ra đĩa) và transform.py (bỏ qua file đã hỏng).
-Nhét vào một trong hai thì bên còn lại phải import chéo — mà transform.py cố ý
-không được kéo theo patchright, đó là lý do có extra `crawler` riêng.
+Kept separate because two places need this knowledge without depending on each
+other: extract.py (blocking bad data before it reaches disk) and transform.py
+(skipping files that are already bad). Putting it in either one would force a
+cross-import -- and transform.py deliberately must not drag in patchright,
+which is why there is a separate `crawler` extra.
 
-Khuôn thật, lấy từ file trong data/raw/:
+The real shape, taken from a file in data/raw/:
 
     {"bff_meta": {...}, "error": null, "error_msg": null,
      "data": {"item": {...}, "account": {...}, ...}}
 
-extract.py bọc nó thành envelope trước khi ghi:
+extract.py wraps it in an envelope before writing:
 
-    {"data": <payload trên>, "url": ..., "scraped_at": "2026-08-27T05:55:22Z"}
+    {"data": <the payload above>, "url": ..., "scraped_at": "2026-08-27T05:55:22Z"}
 """
 import re
 from datetime import datetime, timezone
 
-# Dấu thời gian trong TÊN file raw: shopee_raw_<item_id>_20260827T055522Z.json
-# extract.py dùng để đặt tên, transform.py dùng để đọc ngược ra thời điểm cào
-# với file cũ chưa có scraped_at trong envelope. Hai bên phải dùng CHUNG một
-# hằng số, lệch nhau là tên file ghi một kiểu, đọc một kiểu.
+# The timestamp in a raw FILENAME: shopee_raw_<item_id>_20260827T055522Z.json
+# extract.py uses it to name files, transform.py to read the scrape time back
+# for files whose envelope has no scraped_at. Both sides must share this one
+# constant: any drift and files are written in one format, read in another.
 RAW_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 _RAW_TIMESTAMP_PATTERN = re.compile(r"(\d{8}T\d{6}Z)")
 
@@ -30,22 +32,21 @@ _RAW_TIMESTAMP_PATTERN = re.compile(r"(\d{8}T\d{6}Z)")
 def format_timestamp(moment: datetime) -> str:
     """Format a UTC timestamp for a raw filename.
 
-    Đóng dấu thời gian để đặt tên file. Luôn quy về UTC trước."""
+    Stamps the time used to name a file. Always normalised to UTC first."""
     return moment.astimezone(timezone.utc).strftime(RAW_TIMESTAMP_FORMAT)
 
 
 def find_scraped_at(raw) -> str | None:
     """Read scraped_at from the envelope, or None if unusable.
 
-    Đọc scraped_at từ envelope, None nếu không có hoặc không đọc được.
+    Verifies the value actually parses rather than only checking "is a non-empty
+    string": garbage is still a string, and it would flow straight into the
+    record and on into the warehouse. Returning None on garbage falls through to
+    the next source (the filename) -- a hand-edited or partly corrupted envelope
+    usually still has an intact filename.
 
-    Có kiểm tra parse được chứ không chỉ kiểm tra "là chuỗi khác rỗng": một
-    giá trị rác vẫn là chuỗi, và nó sẽ đi thẳng vào record rồi xuống warehouse.
-    Trả None khi rác để tụt xuống nguồn kế tiếp (tên file) — file bị sửa tay
-    hay hỏng phần envelope thì tên file thường vẫn còn nguyên.
-
-    Trả lại dạng đã chuẩn hoá để mọi record dùng chung một định dạng, dù
-    envelope ghi kiểu 'Z' hay '+00:00'.
+    Returns a normalised value so every record shares one format, whether the
+    envelope wrote 'Z' or '+00:00'.
     """
     if not isinstance(raw, dict):
         return None
@@ -56,9 +57,10 @@ def find_scraped_at(raw) -> str | None:
         moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
-    # Thiếu tzinfo thì coi là UTC: extract.py luôn ghi kèm offset, nên file
-    # không có offset là file lạ — nhưng đoán UTC vẫn đúng hơn là đoán giờ máy
-    # đang chạy transform, vì máy đó có thể ở múi giờ khác máy đã cào.
+    # Missing tzinfo is treated as UTC: extract.py always writes an offset, so a
+    # file without one is unusual -- but guessing UTC is still safer than
+    # guessing the clock of whichever machine runs transform, which may sit in a
+    # different timezone than the one that scraped.
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     return moment.astimezone(timezone.utc).isoformat()
@@ -67,13 +69,15 @@ def find_scraped_at(raw) -> str | None:
 def scraped_at_from_filename(name: str) -> str | None:
     """Recover the scrape time from a filename.
 
-    Suy ra thời điểm cào từ tên file, None nếu tên không theo quy ước.
+    Returns None if the name does not follow the convention.
 
-    Dùng cho file cào trước khi envelope có scraped_at — data/raw/ đang có
-    file thật thuộc loại đó, coi chúng là hỏng là tự vứt dữ liệu còn tốt.
+    Used for files scraped before the envelope carried scraped_at -- data/raw/
+    holds real files of that kind, and treating them as broken would throw away
+    perfectly good data.
 
-    Tìm bằng regex chứ không cắt chuỗi theo vị trí: tên file có nhiều dấu `_`
-    và cắt theo thứ tự sẽ im lặng nhận nhầm khi quy ước đặt tên đổi.
+    Searched by regex rather than sliced by position: the filename contains
+    several `_` separators, and positional slicing would silently match the
+    wrong part the moment the naming convention changes.
     """
     match = _RAW_TIMESTAMP_PATTERN.search(name)
     if match is None:
@@ -88,21 +92,20 @@ def scraped_at_from_filename(name: str) -> str | None:
 def find_item(payload) -> dict | None:
     """Return the item block, or None if Shopee refused us.
 
-    Trả về block `item`, hoặc None nếu payload này không dùng được.
-
-    Trả None thay vì ném: hai chỗ gọi cần phản ứng khác nhau — extract.py biến
-    nó thành FetchFailedError để tenacity retry, còn find_latest_raw_file()
-    chỉ bỏ qua file đó rồi đi tiếp.
+    Returns None instead of raising: the two callers need to react differently
+    -- extract.py turns it into a FetchFailedError so tenacity retries, while
+    find_latest_raw_file() just skips that file and moves on.
     """
     if not isinstance(payload, dict):
         return None
 
-    # Shopee KHÔNG trả HTTP 4xx/5xx khi chặn hay throttle — nó trả 200 kèm JSON
-    # hợp lệ có "error" khác null. Vì thế phải soi giá trị `error`, không phải
-    # soi HTTP status hay xem JSON có parse được không.
+    # Shopee does NOT return HTTP 4xx/5xx when it blocks or throttles -- it
+    # returns 200 with valid JSON whose "error" is non-null. So the check has to
+    # look at the `error` value, not at the HTTP status or at whether the JSON
+    # parses.
     #
-    # Dùng truthiness chứ không phải `is not None`: error=0 nghĩa là KHÔNG lỗi,
-    # gộp chung với null. Chỉ giá trị khác 0/null mới là lỗi thật.
+    # Truthiness rather than `is not None`: error=0 means NO error, same as
+    # null. Only a value other than 0/null is a real error.
     if payload.get("error"):
         return None
 
@@ -111,7 +114,7 @@ def find_item(payload) -> dict | None:
         return None
 
     item = data.get("item")
-    # item rỗng cũng vô dụng như không có item, nên chặn luôn cả `{}`.
+    # An empty item is as useless as a missing one, so `{}` is rejected too.
     if not isinstance(item, dict) or not item:
         return None
 
@@ -121,30 +124,31 @@ def find_item(payload) -> dict | None:
 def describe_problem(payload) -> str:
     """Say in one phrase why a payload is unusable.
 
-    Mô tả ngắn gọn payload hỏng ở đâu, để nhét vào thông báo lỗi/log.
+    A short description of where the payload is broken, for error messages and
+    logs.
 
-    Kèm nguyên văn error/error_msg Shopee trả về — nuốt mất hai giá trị này là
-    vứt đi manh mối tốt nhất để biết mình bị chặn hay chỉ gặp trục trặc tạm.
+    Quotes Shopee's own error/error_msg verbatim -- swallowing those two values
+    throws away the best clue for telling a block apart from a transient hiccup.
     """
     if not isinstance(payload, dict):
-        return f"payload không phải dict mà là {type(payload).__name__}"
+        return f"payload is not a dict but a {type(payload).__name__}"
     if payload.get("error"):
-        return (f"Shopee báo lỗi: error={payload.get('error')!r}, "
+        return (f"Shopee reported an error: error={payload.get('error')!r}, "
                 f"error_msg={payload.get('error_msg')!r}")
     if not isinstance(payload.get("data"), dict):
-        return f"payload['data'] không dùng được: {payload.get('data')!r}"
-    return "payload['data']['item'] thiếu hoặc rỗng"
+        return f"payload['data'] is unusable: {payload.get('data')!r}"
+    return "payload['data']['item'] is missing or empty"
 
 
 def find_item_in_raw(raw) -> dict | None:
     """Return the item block from a raw file, either envelope shape.
 
-    Lấy item từ NỘI DUNG một file raw — chấp nhận cả hai khuôn file.
+    Reads the item out of a raw file's CONTENT -- accepting both file shapes.
 
-    extract.py hiện ghi envelope {"data": <payload>, "url": ...}, nhưng file cào
-    bằng bản code trước khi có envelope là payload trần. data/raw/ đang có file
-    thật thuộc cả hai loại. Cả hai đều chứa dữ liệu dùng được, nên coi khuôn cũ
-    là "file hỏng" rồi bỏ qua là tự vứt đi dữ liệu còn tốt.
+    extract.py currently writes the envelope {"data": <payload>, "url": ...},
+    but files scraped before the envelope existed are bare payloads. data/raw/
+    holds real files of both kinds. Both contain usable data, so treating the
+    old shape as "broken" and skipping it would throw away good data.
     """
     if isinstance(raw, dict) and "data" in raw:
         item = find_item(raw.get("data"))
@@ -156,14 +160,13 @@ def find_item_in_raw(raw) -> dict | None:
 def describe_raw_problem(raw) -> str:
     """Say in one phrase why a raw file is unusable.
 
-    Mô tả vì sao nội dung một file raw không dùng được.
-
-    Phân biệt hai khuôn bằng key "url": chỉ envelope mới có. Nếu không phân biệt
-    thì với payload trần ta sẽ đi mô tả nhầm lớp bên trong và báo "thiếu item"
-    trong khi lỗi thật là Shopee trả error.
+    Tells the two shapes apart by the "url" key: only the envelope has one.
+    Without that distinction, a bare payload would be described one level too
+    deep and reported as "item missing" when the real problem is that Shopee
+    returned an error.
     """
     if not isinstance(raw, dict):
-        return f"nội dung file không phải dict mà là {type(raw).__name__}"
+        return f"file content is not a dict but a {type(raw).__name__}"
     if "url" in raw and "data" in raw:
         return describe_problem(raw.get("data"))
     return describe_problem(raw)

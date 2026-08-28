@@ -11,7 +11,7 @@ with sync_playwright() as p:
     page = browser.new_page()
     page.goto("https://shopee.vn/buyer/login")
 
-    input("Đăng nhập bằng tay xong (kể cả giải captcha nếu có) thì Enter ở đây...")
+    input("Press Enter here once you have logged in by hand (including any captcha)...")
 
-    print("Đã lưu session vào profile — có thể đóng cửa sổ này rồi chạy: python -m price_tracker.sources.shopee.main")
+    print("Session saved to the profile -- you can close this window and run: python -m price_tracker.sources.shopee.main")
     browser.close()

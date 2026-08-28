@@ -17,104 +17,114 @@ from price_tracker.sources.shopee.payload import (
 
 logger = logging.getLogger(__name__)
 
-# Shopee trả giá dưới dạng số nguyên đã nhân sẵn 100_000 (48_900_000_000 -> 489_000 VND).
-# Đặt tên hằng số thay vì rải số 100_000 trong code: sai hệ số này là hỏng toàn bộ
-# mart layer mà không có gì báo động, nên phải để nó ở một chỗ duy nhất, dễ soi.
+# Shopee returns prices as integers pre-multiplied by 100_000
+# (48_900_000_000 -> 489_000 VND). Named instead of sprinkling 100_000 through
+# the code: getting this factor wrong breaks the entire mart layer with nothing
+# raising an alarm, so it has to live in exactly one obvious place.
 SHOPEE_PRICE_SCALE = 100_000
 
 
 def find_latest_raw_file(item_id: str) -> Path:
     """Newest still-usable raw file for one listing.
 
-    Trả file raw mới nhất còn DÙNG ĐƯỢC **của đúng SKU này**.
+    item_id is a REQUIRED parameter, deliberately without a default. The
+    previous version globbed "shopee_raw_*.json", i.e. swept up every SKU and
+    returned the single newest file -- harmless with one SKU, but from the
+    second SKU on, N-1 SKUs are dropped SILENTLY: transform runs, raises
+    nothing, and simply produces almost no data. Giving item_id a default is an
+    invitation for that bug to come back.
 
-    item_id là tham số BẮT BUỘC, cố ý không cho mặc định. Bản trước glob
-    "shopee_raw_*.json" tức vơ hết mọi SKU rồi trả về đúng một file mới nhất —
-    với 1 SKU thì vô hại, nhưng từ SKU thứ 2 là N-1 SKU bị bỏ rơi IM LẶNG:
-    transform chạy xong, không lỗi, chỉ là thiếu gần hết dữ liệu. Để item_id
-    có giá trị mặc định là mời cái bug đó quay lại.
+    "Still usable" is the other half of the point. The old version took the file
+    with the highest mtime outright, so a single poisoned file landing in
+    data/raw/ became the chosen file forever, and every later transform run
+    broke in the same spot. Broken once, broken always -- and the only cure was
+    deleting the file by hand, assuming you guessed the cause.
 
-    Khác biệt đó là cả vấn đề. Bản cũ lấy thẳng file mtime lớn nhất, nên chỉ cần
-    một file hỏng lọt vào data/raw/ là nó vĩnh viễn là file được chọn, và mọi
-    lần chạy transform sau đó đều vỡ ở cùng một chỗ. Hỏng một lần, hỏng mãi, mà
-    cách sửa duy nhất là tự vào xoá file bằng tay — nếu đoán ra được nguyên nhân.
+    Now it walks newest to oldest and skips files it cannot read: one healthy
+    scrape is enough to keep the pipeline moving. Every skipped file is logged
+    with its name and the reason, so there is a trail to clean up.
 
-    Giờ duyệt từ mới về cũ và bỏ qua file không đọc được: chỉ cần còn một bản
-    cào lành là pipeline chạy tiếp được. Mỗi file bị bỏ qua đều log warning kèm
-    tên và lý do, để còn biết đường đi dọn.
+    Searched recursively (rglob, not glob) because extract.py writes into
+    per-day folders -- data/raw/2026-08-28/. Recursion is what lets both
+    layouts coexist: the flat files scraped before that change are still found,
+    so switching layouts did not orphan any history.
     """
-    files = sorted(RAW_DIR.glob(f"{RAW_FILE_PREFIX}_{item_id}_*.json"),
+    files = sorted(RAW_DIR.rglob(f"{RAW_FILE_PREFIX}_{item_id}_*.json"),
                    key=lambda p: p.stat().st_mtime, reverse=True)
     if not files:
         raise FileNotFoundError(
-            f"Không có file raw nào của item_id={item_id} trong {RAW_DIR} — "
-            f"chạy extract trước.")
+            f"No raw file for item_id={item_id} in {RAW_DIR} -- "
+            f"run extract first.")
 
     skipped: list[str] = []
     for path in files:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-        # UnicodeDecodeError phải có mặt: read_text(encoding="utf-8") ném nó
-        # TRƯỚC khi json.loads kịp chạy, và nó không phải OSError cũng không
-        # phải JSONDecodeError. extract.py ghi ensure_ascii=False nên file đầy
-        # ký tự nhiều byte — chỉ cần Ctrl-C hay đầy đĩa giữa lúc ghi là dính,
-        # và thế là rơi lại đúng bẫy "hỏng một lần, hỏng mãi".
+        # UnicodeDecodeError has to be here: read_text(encoding="utf-8") raises
+        # it BEFORE json.loads ever runs, and it is neither an OSError nor a
+        # JSONDecodeError. extract.py writes with ensure_ascii=False, so the
+        # files are full of multi-byte characters -- a Ctrl-C or a full disk
+        # mid-write is enough to trigger it, and that would drop us right back
+        # into the "broken once, broken always" trap.
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             reason = f"{type(exc).__name__}: {exc}"
         else:
             if find_item_in_raw(raw) is not None:
                 if skipped:
-                    # Cảnh báo vẫn cần, nhưng hệ quả nay nhẹ hơn trước nhiều:
-                    # resolve_scraped_at() đóng dấu đúng thời điểm CÀO, nên
-                    # record sinh từ file cũ mang luôn ngày cũ. Nạp lên warehouse
-                    # nó trùng khoá với bản đã có và bị merge đè, chứ không đội
-                    # lốt một quan sát mới của hôm nay. Nói cách khác: hôm nay
-                    # KHÔNG có điểm dữ liệu — và đó là sự thật cần thấy được,
-                    # thay vì một đường giá phẳng trông như hàng không đổi giá.
+                    # The warning still matters, but the consequence is far
+                    # milder than it used to be: resolve_scraped_at() stamps the
+                    # real SCRAPE time, so a record built from an old file
+                    # carries the old date. Loaded into the warehouse it
+                    # collides with the existing key and gets merged over,
+                    # rather than posing as a fresh observation from today. In
+                    # other words: today has NO data point -- and that is a
+                    # truth worth seeing, instead of a flat price line that
+                    # looks like a product whose price never moved.
                     logger.warning(
-                        "Đã bỏ qua %d file raw hỏng, đang dùng bản cào CŨ HƠN: %s. "
-                        "Record mang ngày cũ, nên hôm nay coi như KHÔNG cào được — "
-                        "kiểm tra xem có đang bị chặn không.",
+                        "Skipped %d broken raw file(s), falling back to an OLDER "
+                        "scrape: %s. The record carries the old date, so today "
+                        "counts as NOT scraped -- check whether we are being "
+                        "blocked.",
                         len(skipped), path.name)
                 return path
             reason = describe_raw_problem(raw)
 
         skipped.append(path.name)
-        logger.warning("Bỏ qua file raw hỏng %s — %s", path.name, reason)
+        logger.warning("Skipping broken raw file %s -- %s", path.name, reason)
 
     raise FileNotFoundError(
-        f"Có {len(files)} file raw của item_id={item_id} trong {RAW_DIR} nhưng "
-        f"không file nào dùng được. Đã bỏ qua: {', '.join(skipped)}. "
-        f"Chạy lại extract để lấy bản mới."
+        f"Found {len(files)} raw file(s) for item_id={item_id} in {RAW_DIR} but "
+        f"none of them is usable. Skipped: {', '.join(skipped)}. "
+        f"Run extract again for a fresh scrape."
     )
 
 
 def parse_price(item: dict) -> float | None:
     """Convert Shopee's scaled integer to VND, or None if unusable.
 
-    Lấy giá từ item, trả None nếu Shopee không trả giá nào.
+    Uses `is None` and NOT `or`: `item.get("price") or ...` treats a price of 0
+    as falsy and falls through to the fallback branch, destroying our ability to
+    tell "genuinely free" apart from "Shopee returned no price". Those two cases
+    must be handled differently downstream.
 
-    Dùng `is None` chứ KHÔNG dùng `or`: `item.get("price") or ...` coi giá 0
-    là falsy nên nó tụt xuống nhánh fallback, làm ta mất khả năng phân biệt
-    "hàng giá 0đ thật" với "Shopee không trả giá". Hai ca này phải xử lý
-    khác nhau ở lớp dưới.
-
-    Trả None thay vì 0.0 khi thiếu giá, vì 0.0 là bug thầm lặng: xuống mart
-    layer nó trông y như một mức giá hợp lệ và đẻ ra price_change_pct = -100%.
-    Cũng không raise, vì một SKU hỏng không đáng để giết cả run — theo đúng
-    hướng "malformed price -> quarantine" đã ghi trong README.
+    Returns None rather than 0.0 when the price is missing, because 0.0 is a
+    silent bug: down in the mart layer it looks like a valid price and produces
+    price_change_pct = -100%. It does not raise either, because one broken SKU
+    is not worth killing the whole run -- matching the "malformed price ->
+    quarantine" direction stated in the README.
     """
     raw_price = item.get("price")
     if raw_price is None:
         raw_price = item.get("price_min")
 
-    # Chặn theo KIỂU chứ không chỉ chặn None: Shopee có field trả giá dạng chuỗi,
-    # mà `"48900000000" / 100_000` ném TypeError thoát thẳng ra ngoài — đúng cái
-    # "giết cả run vì một SKU" mà hàm này tự nhận là tránh. bool bị loại riêng vì
-    # trong Python nó là subclass của int (True / 100_000 = 1e-05, im như thật).
+    # Guard on TYPE, not just on None: Shopee has fields that return the price
+    # as a string, and `"48900000000" / 100_000` raises a TypeError that escapes
+    # straight out -- exactly the "one SKU kills the run" this function claims
+    # to prevent. bool is excluded separately because in Python it subclasses
+    # int (True / 100_000 = 1e-05, which looks entirely plausible).
     if isinstance(raw_price, bool) or not isinstance(raw_price, (int, float)):
         logger.warning(
-            "SKU %s có giá không dùng được (price=%r, price_min=%r) — trả price=None để lớp dưới tách ra quarantine",
+            "SKU %s has an unusable price (price=%r, price_min=%r) -- returning price=None so the layer below can quarantine it",
             item.get("item_id"), item.get("price"), item.get("price_min"),
         )
         return None
@@ -125,21 +135,21 @@ def parse_price(item: dict) -> float | None:
 def resolve_scraped_at(raw, raw_path: Path) -> str:
     """The time the page was scraped, never the time we ran.
 
-    Thời điểm CÀO của file raw này — không phải thời điểm chạy transform.
+    Telling those two moments apart is the whole point. find_latest_raw_file()
+    may return an OLD scrape when the newest one is broken; if this function
+    stamped datetime.now(), the resulting record would carry an OLD PRICE with
+    TODAY'S TIMESTAMP. Run daily while Shopee blocks us for a week, and the mart
+    layer receives a perfectly flat price series that looks entirely real --
+    LAG() sees nothing unusual and nobody knows the data is fabricated.
 
-    Phân biệt hai mốc đó là cả vấn đề. find_latest_raw_file() có thể trả về một
-    bản cào CŨ khi bản mới nhất hỏng; nếu chỗ này đóng dấu datetime.now() thì
-    record sinh ra mang GIÁ CŨ với DẤU THỜI GIAN HÔM NAY. Chạy hằng ngày trong
-    lúc Shopee chặn mình cả tuần, mart layer nhận về chuỗi giá phẳng lì trông y
-    như thật — LAG() không thấy gì bất thường và không ai biết là dữ liệu giả.
+    Even in the normal case this is the correct semantics: scraped_at is when we
+    *scraped*, not when we *transformed*. Those only happen to be close together
+    when main.py runs both in one go.
 
-    Kể cả ở ca bình thường thì đây mới là ngữ nghĩa đúng: scraped_at là lúc
-    *cào*, không phải lúc *transform*. Hai lúc đó chỉ tình cờ gần nhau khi chạy
-    main.py một mạch.
-
-    Thứ tự ưu tiên: envelope trước (chính xác tới giây, do extract ghi), rồi
-    mới tới tên file (cho file cào bằng bản code cũ). Không tìm được thì NÉM,
-    tuyệt đối không lặng lẽ quay về now() — đó đúng là bug đang sửa.
+    Order of preference: the envelope first (accurate to the second, written by
+    extract), then the filename (for files scraped by older code). If neither
+    works it RAISES -- never silently falling back to now(), which is the very
+    bug being fixed.
     """
     embedded = find_scraped_at(raw)
     if embedded is not None:
@@ -150,64 +160,71 @@ def resolve_scraped_at(raw, raw_path: Path) -> str:
         return from_name
 
     raise ValueError(
-        f"File raw {raw_path.name} không suy ra được thời điểm cào: envelope "
-        f"không có 'scraped_at' và tên file không chứa dấu thời gian dạng "
-        f"20260827T055522Z. Không đoán bừa bằng giờ hiện tại vì như thế là đẻ "
-        f"ra một dòng dữ liệu sai mà không ai phát hiện."
+        f"Cannot derive the scrape time for raw file {raw_path.name}: the "
+        f"envelope has no 'scraped_at' and the filename carries no timestamp in "
+        f"the 20260827T055522Z form. Guessing with the current clock is not an "
+        f"option, because that produces a wrong row nobody ever notices."
     )
 
 
 def build_record(raw_path: Path, listing_cfg: dict) -> dict:
     """Map a raw file plus its config into one record.
 
-    Ép file raw về schema chung, trộn thêm phần danh tính đến từ cấu hình.
+    listing_cfg is a REQUIRED parameter, deliberately without a default. A
+    record has to carry TWO LAYERS of identity, and the upper one exists only in
+    the config:
 
-    listing_cfg là tham số BẮT BUỘC, cố ý không cho mặc định. Record phải mang
-    HAI TẦNG danh tính, và tầng trên chỉ có trong cấu hình:
+      - `sku`      -- the logical SKU ("G102-LIGHTSYNC"). This is the JOIN KEY
+                      to reference_price in the mart layer. Many sellers list
+                      the same product, each with a different item_id; without
+                      this column the mart has no way back to the list price,
+                      i.e. no price_gap_pct -- the entire point of the project.
+      - `item_id`  -- the LISTING id on the marketplace. It used to be called
+                      `sku_id`, which misnamed it: it was never a SKU, only the
+                      id of one listing.
+      - `source`   -- the marketplace. item_id is unique only WITHIN a
+                      marketplace, so a natural key of
+                      (sku, source, item_id, scraped_at) without source invites
+                      a collision the moment TikTok lands in the same staging
+                      directory.
+      - `is_official` -- also from the config, absent from the Shopee payload.
+                      Without it the mart cannot separate the official store's
+                      price from anyone else's, which is the question we are
+                      here to answer.
 
-      - `sku`      — SKU logic ("G102-LIGHTSYNC"). Đây là KHOÁ JOIN tới
-                     reference_price ở mart layer. Nhiều người bán rao cùng một
-                     sản phẩm, mỗi listing một item_id khác nhau; không có cột
-                     này thì mart không có đường nào nối về giá niêm yết, tức
-                     không tính được price_gap_pct — mất toàn bộ mục đích dự án.
-      - `item_id`  — mã LISTING trên sàn. Tên cũ là `sku_id`, sai bản chất:
-                     nó chưa bao giờ là SKU, chỉ là id của một tin đăng.
-      - `source`   — tên sàn. item_id chỉ duy nhất TRONG một sàn, nên khoá tự
-                     nhiên (sku, source, item_id, scraped_at) mà thiếu source
-                     là mời đụng độ ngay khi TikTok đổ vào cùng staging dir.
-      - `is_official` — cũng đến từ cấu hình, không có trong payload Shopee.
-                     Thiếu nó thì mart không phân biệt nổi giá chính hãng với
-                     giá của người bán khác, mà đó chính là câu hỏi cần trả lời.
-
-    Cho listing_cfg một giá trị mặc định sẽ khiến chỗ gọi quên truyền mà vẫn
-    chạy, đẻ ra record thiếu khoá join — hỏng im lặng tới tận mart layer.
+    Giving listing_cfg a default would let a caller forget to pass it and still
+    run, producing records with no join key -- broken silently all the way down
+    to the mart layer.
     """
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
 
-    # Không index thẳng raw["data"]["data"]["item"] nữa: với file độc thì nó nổ
-    # TypeError: 'NoneType' object is not subscriptable — đúng nhưng không nói
-    # được file nào hỏng hay hỏng vì sao. Đi qua find_item() để lỗi chỉ thẳng
-    # vào file cần xoá.
+    # No longer indexing raw["data"]["data"]["item"] directly: on a poisoned
+    # file that raises TypeError: 'NoneType' object is not subscriptable --
+    # accurate, but it says nothing about which file is broken or why. Going
+    # through find_item() makes the error point straight at the file to delete.
     item = find_item_in_raw(raw)
     if item is None:
         raise ValueError(
-            f"File raw {raw_path.name} không dùng được — {describe_raw_problem(raw)}"
+            f"Raw file {raw_path.name} is unusable -- {describe_raw_problem(raw)}"
         )
 
     return {
-        # Tầng 1 — danh tính logic, đến từ config/skus.yaml
+        # Layer 1 -- logical identity, from config/skus.yaml
         "sku": listing_cfg.get("sku"),
         "is_official": listing_cfg.get("is_official"),
         "source": "shopee",
-        # Tầng 2 — danh tính trên sàn.
-        # item_id lấy từ CẤU HÌNH chứ không từ payload, dù payload cũng có.
-        # Hai lý do: (1) payload thiếu field này thì record mang item_id=None
-        # và save_record đặt tên file shopee_record_None_<ts>.json — hai listing
-        # cào trong cùng một giây ghi đè nhau; (2) payload trả int còn skus.yaml
-        # và find_latest_raw_file() dùng str, để lệch kiểu thì mọi phép join
-        # sau này với bảng seed cấu hình phải cast mà không ai ghi lại là vì sao.
-        # extract.fetch_one_listing() đã đối chiếu payload khớp cấu hình trước
-        # khi ghi file, nên lấy từ cấu hình là an toàn.
+        # Layer 2 -- identity on the marketplace.
+        # item_id comes from the CONFIG and not from the payload, even though
+        # the payload has it too. Two reasons: (1) if the payload lacks the
+        # field, the record carries item_id=None and save_record names the file
+        # shopee_record_None_<ts>.json -- two listings scraped in the same
+        # second overwrite each other; (2) the payload returns an int while
+        # skus.yaml and find_latest_raw_file() use str, and letting the types
+        # drift means every future join against the config seed needs a cast
+        # nobody documented.
+        # extract.fetch_one_listing() already cross-checks the payload against
+        # the config before writing the file, so taking it from the config is
+        # safe.
         "item_id": listing_cfg.get("item_id"),
         "seller_id": item.get("shop_id"),
         "product_name": item.get("title"),
@@ -218,32 +235,35 @@ def build_record(raw_path: Path, listing_cfg: dict) -> dict:
 
 
 def save_record(record: dict) -> Path:
-    # Tên file lấy từ scraped_at của record, KHÔNG phải giờ chạy. Hai lý do:
+    # The filename comes from the record's scraped_at, NOT from the wall clock.
+    # Two reasons:
     #
-    # 1. Idempotent — chạy lại transform trên cùng một file raw ra cùng một tên
-    #    file, ghi đè thay vì đẻ thêm bản sao. data/staging/ rồi sẽ được nạp lên
-    #    warehouse; mỗi lần chạy lại đẻ một file mới là tự tạo dòng trùng ở tầng
-    #    dưới, đúng thứ dbt incremental unique_key sinh ra để dẹp.
-    # 2. Truy vết — record_<ts>.json khớp thẳng với raw_<ts>.json sinh ra nó,
-    #    khỏi phải dò mtime để biết bản ghi này từ bản cào nào.
+    # 1. Idempotency -- re-running transform on the same raw file produces the
+    #    same filename and overwrites instead of adding a copy. data/staging/
+    #    will be loaded into the warehouse; every re-run producing a new file
+    #    means manufacturing duplicate rows downstream, exactly what dbt's
+    #    incremental unique_key exists to clean up.
+    # 2. Traceability -- record_<ts>.json lines up directly with the
+    #    raw_<ts>.json it came from, with no mtime archaeology needed.
     """Write the record to data/staging, named by scrape time."""
     ts = format_timestamp(datetime.fromisoformat(record["scraped_at"]))
     out_path = STAGING_DIR / f"shopee_record_{record['item_id']}_{ts}.json"
     out_path.write_text(json.dumps(
         record, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Đã lưu record: {out_path}")
+    print(f"Saved record: {out_path}")
     return out_path
 
 
 if __name__ == "__main__":
-    # Chạy transform độc lập trên bản cào mới nhất của TỪNG LISTING, không phải
-    # trên đúng một file — nếu không thì chạy tay lại tái hiện đúng cái bug
-    # "N-1 listing bị bỏ rơi" mà find_latest_raw_file(item_id) vừa dẹp.
+    # Run transform standalone over the newest scrape of EVERY LISTING, not over
+    # a single file -- otherwise a manual run reproduces exactly the "N-1
+    # listings dropped" bug that find_latest_raw_file(item_id) just fixed.
     #
-    # Mỗi listing một khối try riêng, cùng lý do như trong fetch_all_listings():
-    # một listing chưa có file raw (hôm nay bị chặn) sẽ ném FileNotFoundError,
-    # và nếu không cô lập thì nó giết luôn các listing phía sau vốn có file
-    # hoàn toàn lành — đúng cái kiểu mất dữ liệu mà cả file này đang chống.
+    # One try block per listing, for the same reason as in fetch_all_listings():
+    # a listing with no raw file yet (blocked today) raises FileNotFoundError,
+    # and without isolation it would take down the listings behind it that have
+    # perfectly healthy files -- precisely the kind of data loss this whole file
+    # is built to prevent.
     _failures = {}
     for _listing in load_source_listings("shopee"):
         _label = listing_label(_listing)
@@ -254,9 +274,9 @@ if __name__ == "__main__":
             print(json.dumps(_record, indent=2, ensure_ascii=False))
         except Exception as _exc:
             _failures[_label] = f"{type(_exc).__name__}: {_exc}"
-            logger.warning("Không đóng gói được %s: %s", _label, _exc)
+            logger.warning("Could not package %s: %s", _label, _exc)
 
     if _failures:
         raise SystemExit(
-            "Có listing không đóng gói được: "
+            "Some listings could not be packaged: "
             + "; ".join(f"{k}: {v}" for k, v in _failures.items()))

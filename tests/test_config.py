@@ -1,9 +1,10 @@
-"""Test cho config.py — phần đọc danh sách SKU và listing.
+"""Tests for config.py -- reading the SKU list and its listings.
 
-Mọi test ở đây trỏ SKUS_FILE vào file YAML tạm của riêng nó. Cố ý KHÔNG đọc
-config/skus.yaml thật: file thật chỉ chứa listing có link sản phẩm có thật, còn
-muốn nhiều SKU/listing để test thì bịa trong tmp_path. Bịa vào file thật là trỏ
-pipeline vào sản phẩm không tồn tại và test sẽ xanh giả.
+Every test here points SKUS_FILE at its own temporary YAML file. It
+deliberately does NOT read the real config/skus.yaml: that file only holds
+listings with real product links, and inventing extra SKUs/listings for a test
+belongs in tmp_path. Inventing them in the real file would point the pipeline at
+products that do not exist, and the tests would go green for the wrong reason.
 """
 
 import pytest
@@ -11,23 +12,23 @@ import yaml
 
 from price_tracker import config as config_module
 
-# Khuôn giống config/skus.yaml thật: mỗi nguồn là một DANH SÁCH listing, vì
-# cùng một sản phẩm được nhiều người bán rao, mỗi người một item_id.
+# Same shape as the real config/skus.yaml: each source is a LIST of listings,
+# because the same product is sold by several sellers, each with its own item_id.
 TWO_SKUS = [
-    {"sku": "SKU-A", "name": "Sản phẩm A", "reference_price": 489000,
+    {"sku": "SKU-A", "name": "Product A", "reference_price": 489000,
      "sources": {"shopee": [
          {"shop_id": "11", "item_id": "111", "is_official": True,
-          "listing_title": "A chính hãng", "url": "https://shopee.vn/a1"},
+          "listing_title": "A official", "url": "https://shopee.vn/a1"},
          {"shop_id": "12", "item_id": "112", "is_official": False,
-          "listing_title": "A shop khác", "url": "https://shopee.vn/a2"},
+          "listing_title": "A other shop", "url": "https://shopee.vn/a2"},
      ]}},
-    {"sku": "SKU-B", "name": "Sản phẩm B", "reference_price": 199000,
+    {"sku": "SKU-B", "name": "Product B", "reference_price": 199000,
      "sources": {"shopee": [
          {"shop_id": "22", "item_id": "222", "is_official": True,
           "listing_title": "B", "url": "https://shopee.vn/b"}],
          "tiktok": [
          {"shop_id": "99", "item_id": "999", "is_official": False,
-          "listing_title": "B trên tiktok", "url": "https://tiktok.com/b"}]}},
+          "listing_title": "B on tiktok", "url": "https://tiktok.com/b"}]}},
 ]
 
 
@@ -39,8 +40,8 @@ def _use_skus(monkeypatch, tmp_path, entries):
 
 
 def test_load_source_listings_returns_one_entry_per_listing(monkeypatch, tmp_path):
-    """Lặp theo LISTING chứ không theo SKU: SKU-A có 2 người bán nên phải ra 2
-    dòng, vì mỗi listing là một request thật tới sàn."""
+    """Iterates over LISTINGS, not SKUs: SKU-A has two sellers so it must yield
+    two rows, because each listing is a real request to the marketplace."""
     _use_skus(monkeypatch, tmp_path, TWO_SKUS)
 
     got = config_module.load_source_listings("shopee")
@@ -49,18 +50,18 @@ def test_load_source_listings_returns_one_entry_per_listing(monkeypatch, tmp_pat
 
 
 def test_load_source_listings_carries_the_sku_down_to_every_listing(monkeypatch, tmp_path):
-    """`sku` phải đi kèm từng listing — nó là khoá join tới reference_price.
+    """`sku` must travel with every listing -- it is the join key to reference_price.
 
-    Hai listing của SKU-A có item_id khác nhau nhưng cùng một SKU logic; thiếu
-    cột này thì mart layer không nối được về giá niêm yết và price_gap_pct
-    không tồn tại."""
+    The two listings of SKU-A have different item_ids but share one logical SKU;
+    without this column the mart layer cannot reach back to the list price and
+    price_gap_pct does not exist."""
     _use_skus(monkeypatch, tmp_path, TWO_SKUS)
 
     got = config_module.load_source_listings("shopee")
 
     assert [g["sku"] for g in got] == ["SKU-A", "SKU-A", "SKU-B"]
     assert got[0]["reference_price"] == 489000
-    assert got[1]["reference_price"] == 489000, "Hai listing chung một giá niêm yết"
+    assert got[1]["reference_price"] == 489000, "Both listings share one list price"
     assert got[0]["is_official"] is True
     assert got[1]["is_official"] is False
 
@@ -75,18 +76,19 @@ def test_load_source_listings_picks_the_right_source(monkeypatch, tmp_path):
 
 
 def test_load_source_listings_skips_a_sku_without_that_source(monkeypatch, tmp_path, caplog):
-    """Thêm TikTok cho 1 SKU không có nghĩa các SKU còn lại phải dừng cào Shopee."""
+    """Adding TikTok for one SKU must not stop the others being scraped on Shopee."""
     _use_skus(monkeypatch, tmp_path, TWO_SKUS)
 
     got = config_module.load_source_listings("tiktok")
 
     assert len(got) == 1
-    assert "SKU-A" in caplog.text, "Bỏ qua thì phải nói, không thì im lặng mất SKU"
+    assert "SKU-A" in caplog.text, "Skipping silently means losing a SKU unnoticed"
 
 
 def test_load_source_listings_raises_when_nothing_declares_that_source(monkeypatch, tmp_path):
-    """Không SKU nào khai báo nguồn = lỗi cấu hình, phải vỡ ngay chứ không trả
-    list rỗng rồi để crawler chạy một mẻ trống và báo thành công."""
+    """No SKU declaring the source is a config error and must fail immediately,
+    rather than returning an empty list and letting the crawler run an empty
+    batch it then reports as a success."""
     _use_skus(monkeypatch, tmp_path, TWO_SKUS)
 
     with pytest.raises(ValueError) as excinfo:
@@ -95,41 +97,43 @@ def test_load_source_listings_raises_when_nothing_declares_that_source(monkeypat
     assert "lazada" in str(excinfo.value)
 
 
-def test_get_listings_returns_every_seller_of_one_sku(monkeypatch, tmp_path):
+def test_get_listings_for_sku_returns_every_seller_of_one_sku(monkeypatch, tmp_path):
     _use_skus(monkeypatch, tmp_path, TWO_SKUS)
 
-    got = config_module.get_listings("SKU-A", "shopee")
+    got = config_module.get_listings_for_sku("SKU-A", "shopee")
 
     assert [g["item_id"] for g in got] == ["111", "112"]
 
 
-def test_get_listings_raises_for_an_unknown_sku(monkeypatch, tmp_path):
+def test_get_listings_for_sku_raises_for_an_unknown_sku(monkeypatch, tmp_path):
     _use_skus(monkeypatch, tmp_path, TWO_SKUS)
 
     with pytest.raises(KeyError):
-        config_module.get_listings("KHONG-CO", "shopee")
+        config_module.get_listings_for_sku("NO-SUCH-SKU", "shopee")
 
 
 # ---------------------------------------------------------------------------
-# Chặn lỗi gõ nhầm YAML — cấu hình sai phải chỉ đúng chỗ sai.
+# Catching YAML typos -- a wrong config must point at what is wrong.
 # ---------------------------------------------------------------------------
 
 def test_load_skus_rejects_a_mapping_instead_of_a_list(monkeypatch, tmp_path):
-    """Viết YAML thành mapping thay vì list là lỗi rất dễ mắc. Không chặn thì
-    vòng lặp đi qua các key kiểu chuỗi rồi nổ AttributeError: 'str' object has
-    no attribute 'get' — chẳng nói được file cấu hình sai ở đâu."""
+    """Writing the YAML as a mapping instead of a list is an easy mistake.
+    Unchecked, the loop walks over string keys and blows up with
+    AttributeError: 'str' object has no attribute 'get' -- which says nothing
+    about where the config file is wrong."""
     f = tmp_path / "skus.yaml"
-    f.write_text("sku: SKU-A\nname: nham roi\n", encoding="utf-8")
+    f.write_text("sku: SKU-A\nname: wrong shape\n", encoding="utf-8")
     monkeypatch.setattr(config_module, "SKUS_FILE", f)
 
     with pytest.raises(ValueError) as excinfo:
         config_module.load_skus()
 
-    assert "DANH SÁCH" in str(excinfo.value)
+    assert "LIST" in str(excinfo.value)
 
 
 def test_load_source_listings_rejects_a_single_listing_written_as_a_dict(monkeypatch, tmp_path):
-    """Khuôn cũ (mỗi nguồn một dict) giờ là sai — phải báo rõ chứ không im lặng."""
+    """The old shape (one dict per source) is now wrong -- say so, do not accept
+    it silently."""
     _use_skus(monkeypatch, tmp_path, [
         {"sku": "SKU-A", "sources": {"shopee": {"item_id": "111",
                                                 "url": "https://shopee.vn/a"}}}])
@@ -137,16 +141,17 @@ def test_load_source_listings_rejects_a_single_listing_written_as_a_dict(monkeyp
     with pytest.raises(ValueError) as excinfo:
         config_module.load_source_listings("shopee")
 
-    assert "danh sách listing" in str(excinfo.value)
+    assert "listing list" in str(excinfo.value)
 
 
 def test_load_source_listings_does_not_kill_the_batch_over_one_bad_listing(monkeypatch, tmp_path):
-    """Thiếu item_id/url KHÔNG được ném ở tầng đọc cấu hình.
+    """A missing item_id/url must NOT raise in the config layer.
 
-    load_source_listings() chạy trước khi browser kịp mở, nên ném ở đây là quên
-    một dòng `url:` làm chết cả mẻ — kể cả những listing đã chạy tốt hàng tuần.
-    Việc kiểm field chuyển xuống fetch_one_listing() để lỗi chỉ giết đúng
-    listing của nó (xem test bên test_extract.py)."""
+    load_source_listings() runs before the browser even opens, so raising here
+    means one forgotten `url:` line kills the whole batch -- including listings
+    that have been working for weeks. Field checking moved down into
+    fetch_one_listing() so the error kills only its own listing (see the test in
+    test_extract.py)."""
     _use_skus(monkeypatch, tmp_path, [
         {"sku": "SKU-A", "sources": {"shopee": [
             {"shop_id": "11"},
@@ -155,13 +160,13 @@ def test_load_source_listings_does_not_kill_the_batch_over_one_bad_listing(monke
 
     got = config_module.load_source_listings("shopee")
 
-    assert len(got) == 2, "Listing hỏng vẫn đi qua, để tầng dưới báo lỗi riêng nó"
+    assert len(got) == 2, "The bad listing passes through; the layer below reports it alone"
 
 
 def test_load_source_listings_defaults_is_official_to_false_and_says_so(monkeypatch, tmp_path):
-    """Quên `is_official: true` cho cửa hàng chính hãng sẽ đảo ngược câu hỏi
-    kinh doanh — mọi filter `WHERE is_official` coi NULL là không chính hãng.
-    Mặc định False được, nhưng phải kêu lên."""
+    """Forgetting `is_official: true` for the official store inverts the business
+    question -- every `WHERE is_official` filter reads NULL as not official.
+    Defaulting to False is fine, but it has to speak up."""
     _use_skus(monkeypatch, tmp_path, [
         {"sku": "SKU-A", "sources": {"shopee": [
             {"shop_id": "11", "item_id": "111", "url": "https://shopee.vn/a"}]}}])
@@ -172,9 +177,10 @@ def test_load_source_listings_defaults_is_official_to_false_and_says_so(monkeypa
 
 
 def test_load_source_listings_warns_about_duplicate_listings(monkeypatch, tmp_path, caplog):
-    """Thêm người bán bằng cách copy-paste rồi quên sửa item_id là lỗi dễ mắc
-    với khuôn YAML này: cào lặp một trang, và failures (dict khoá theo nhãn)
-    gộp hai listing thành một dòng nên đếm sai kích thước mẻ."""
+    """Copy-pasting a seller and forgetting to change item_id is an easy mistake
+    with this YAML shape: the same page gets scraped twice, and `failures` (keyed
+    by label) collapses both listings into one row, so the batch size is counted
+    wrong."""
     _use_skus(monkeypatch, tmp_path, [
         {"sku": "SKU-A", "sources": {"shopee": [
             {"shop_id": "11", "item_id": "111", "is_official": True,
@@ -184,40 +190,70 @@ def test_load_source_listings_warns_about_duplicate_listings(monkeypatch, tmp_pa
 
     config_module.load_source_listings("shopee")
 
-    assert "nhiều lần" in caplog.text
+    assert "more than once" in caplog.text
 
 
 def test_listing_label_names_both_the_sku_and_the_listing():
-    """Chỉ ghi sku thì hai listing cùng SKU không phân biệt được cái nào hỏng;
-    chỉ ghi item_id thì đọc log không biết là sản phẩm gì."""
+    """The sku alone cannot tell two listings of one SKU apart; the item_id alone
+    leaves you reading a log with no idea which product it is."""
     label = config_module.listing_label({"sku": "SKU-A", "item_id": "111"})
 
     assert "SKU-A" in label and "111" in label
 
 
 # ---------------------------------------------------------------------------
-# Chốt chặn cho file THẬT.
+# raw_dir_for -- per-day partitioning of data/raw/.
+# ---------------------------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone
+
+
+def test_raw_dir_for_names_the_folder_after_the_scrape_day(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "RAW_DIR", tmp_path)
+
+    got = config_module.raw_dir_for(datetime(2026, 8, 28, 5, 55, tzinfo=timezone.utc))
+
+    assert got == tmp_path / "2026-08-28"
+    assert got.is_dir(), "Created on demand -- extract.py writes straight into it"
+
+
+def test_raw_dir_for_uses_utc_not_the_local_clock(tmp_path, monkeypatch):
+    """A scrape at 23:30 UTC must not land in tomorrow's folder just because the
+    machine running it is seven hours ahead. The filename, the envelope and the
+    folder all have to name the same UTC day."""
+    monkeypatch.setattr(config_module, "RAW_DIR", tmp_path)
+    seven_hours_ahead = timezone(timedelta(hours=7))
+
+    got = config_module.raw_dir_for(
+        datetime(2026, 8, 29, 6, 30, tzinfo=seven_hours_ahead))  # = 23:30Z on the 28th
+
+    assert got.name == "2026-08-28"
+
+
+# ---------------------------------------------------------------------------
+# Guard rails for the REAL file.
 # ---------------------------------------------------------------------------
 
 def test_the_real_skus_file_is_readable_and_declares_shopee():
-    """Chỉ kiểm file thật parse được và mọi listing có đủ field code cần.
+    """Only checks that the real file parses and that every listing has the
+    fields the code needs.
 
-    Không assert số lượng hay item_id cụ thể — người dùng sẽ tự thêm listing,
-    và một test đếm số listing sẽ đỏ mỗi lần họ thêm link mới, dạy người ta
-    thói quen bỏ qua test đỏ."""
+    No assertion on counts or specific item_ids: the user will add listings, and
+    a test that counts them would go red every time they add a link -- teaching
+    people to ignore red tests."""
     got = config_module.load_source_listings("shopee")
 
     assert len(got) >= 1
     for entry in got:
         assert entry["item_id"] and entry["url"]
-        assert entry["sku"], "Thiếu sku là mất khoá join tới reference_price"
+        assert entry["sku"], "Without sku there is no join key to reference_price"
 
 
 def test_the_real_skus_file_urls_match_their_shop_and_item_id():
-    """URL Shopee kết thúc bằng .<shop_id>.<item_id> — lệch là cấu hình đã gõ
-    nhầm, và crawler sẽ lặng lẽ cào nhầm trang."""
+    """Shopee URLs end in .<shop_id>.<item_id> -- a mismatch means the config has
+    a typo, and the crawler would silently scrape the wrong page."""
     for entry in config_module.load_source_listings("shopee"):
         shop_id = entry.get("shop_id")
-        assert shop_id, f"Listing {entry['item_id']} thiếu shop_id trong skus.yaml"
+        assert shop_id, f"Listing {entry['item_id']} has no shop_id in skus.yaml"
         assert entry["url"].endswith(f".{shop_id}.{entry['item_id']}"), \
-            f"URL không khớp shop_id/item_id: {entry['url']}"
+            f"URL does not match shop_id/item_id: {entry['url']}"
