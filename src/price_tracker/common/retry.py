@@ -1,3 +1,4 @@
+"""Shared retry policy: three attempts, exponential backoff."""
 import logging
 
 from tenacity import (
@@ -12,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 def shopee_scrape_retry(*retryable_exceptions):
-    """
+    """Build a retry decorator for the exception types a caller cares about.
+
     Decorator factory: mỗi hàm gọi hàm này và truyền vào những loại
     exception nào của RIÊNG nó cần retry (vì mỗi hàm có thể fail vì lý
     do khác nhau), còn cấu hình chung (thử mấy lần, chờ bao lâu) thì

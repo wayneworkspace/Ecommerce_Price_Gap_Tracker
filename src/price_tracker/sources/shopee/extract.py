@@ -1,3 +1,4 @@
+"""Scrape Shopee: drive a real browser, capture the price API, write raw JSON."""
 from price_tracker.config import (
     RAW_DIR, require_user_data_dir, load_source_listings, listing_label)
 from price_tracker.sources.shopee.settings import PDP_API_PATH, RAW_FILE_PREFIX
@@ -41,7 +42,9 @@ DELAY_BETWEEN_LISTINGS_MAX_S = 8.0
 
 
 class FetchFailedError(Exception):
-    """Raise khi một lần thử cào không lấy được JSON dùng được.
+    """One scrape attempt produced no usable JSON.
+
+    Raise khi một lần thử cào không lấy được JSON dùng được.
 
     Mọi lỗi 'có thể thử lại được' đều phải quy về đúng loại này, vì đây là
     loại duy nhất (cùng PWError) mà tenacity chịu retry — xem retry.py.
@@ -50,7 +53,9 @@ class FetchFailedError(Exception):
 
 
 class BatchIncompleteError(Exception):
-    """Mẻ đã chạy hết danh sách listing nhưng có listing không lấy được.
+    """The batch ran to the end, but some listings are missing.
+
+    Mẻ đã chạy hết danh sách listing nhưng có listing không lấy được.
 
     Mang theo cả phần THÀNH CÔNG lẫn phần hỏng, để hàm gọi vẫn xử lý tiếp được
     những gì đã có rồi mới báo đỏ — thay vì mất trắng cả mẻ vì một listing.
@@ -72,7 +77,9 @@ class BatchIncompleteError(Exception):
 
 
 def sleep_between_listings() -> None:
-    """Nghỉ ngẫu nhiên trước khi sang listing kế tiếp.
+    """Pause a random 3-8 seconds before the next listing.
+
+    Nghỉ ngẫu nhiên trước khi sang listing kế tiếp.
 
     Tách thành hàm riêng thay vì gọi thẳng time.sleep() trong vòng lặp, để test
     thay được nó mà không phải ngồi chờ thật.
@@ -83,6 +90,7 @@ def sleep_between_listings() -> None:
 
 
 def extract_json_or_fail(response) -> dict:
+    """Parse the response body as JSON, or raise a retryable error."""
     try:
         return response.json()
     except Exception as exc:
@@ -93,7 +101,9 @@ def extract_json_or_fail(response) -> dict:
 
 
 def validate_payload_or_fail(payload: dict) -> dict:
-    """Kiểm payload có dùng được không, TRẢ VỀ item, ném FetchFailedError nếu không.
+    """Reject a 200-with-error payload before it reaches disk.
+
+    Kiểm payload có dùng được không, TRẢ VỀ item, ném FetchFailedError nếu không.
 
     Đây là lỗ hổng thật của bản trước: extract_json_or_fail() chỉ đảm bảo body
     PARSE được thành JSON. Nhưng khi bị chặn hoặc throttle, Shopee trả HTTP 200
@@ -119,7 +129,9 @@ def validate_payload_or_fail(payload: dict) -> dict:
 
 def dump_debug_evidence(page, debug_dir: Path | None = None,
                         item_id: str | None = None) -> None:
-    """Lưu HTML + ảnh màn hình ngay khi page còn sống, trước khi đóng.
+    """Save HTML and a screenshot while the page is still alive.
+
+    Lưu HTML + ảnh màn hình ngay khi page còn sống, trước khi đóng.
 
     Tên file kèm item_id vì giờ mẻ chạy nhiều listing: dấu thời gian chỉ chính
     xác tới giây, hai listing hỏng trong cùng một giây sẽ ghi đè bằng chứng của
@@ -153,7 +165,9 @@ def dump_debug_evidence(page, debug_dir: Path | None = None,
 
 @shopee_scrape_retry(PWError, FetchFailedError)
 def fetch_one_listing(browser, listing_cfg: dict) -> Path:
-    """Cào đúng MỘT listing trên một browser đã mở sẵn.
+    """Scrape a single listing on an already-open browser.
+
+    Cào đúng MỘT listing trên một browser đã mở sẵn.
 
     Đơn vị là listing, không phải SKU: một SKU có thể được nhiều người bán rao,
     mỗi người một item_id và một trang riêng — tức mỗi listing là một request
@@ -277,7 +291,9 @@ def fetch_one_listing(browser, listing_cfg: dict) -> Path:
 def fetch_all_listings(
     listing_configs: list[dict] | None = None,
 ) -> list[tuple[Path, dict]]:
-    """Cào cả danh sách listing trong một phiên browser duy nhất.
+    """Scrape every listing in one browser session.
+
+    Cào cả danh sách listing trong một phiên browser duy nhất.
 
     Trả về từng cặp (đường dẫn file raw, cấu hình listing) chứ không chỉ đường
     dẫn: khâu đóng gói cần lại `sku` và `is_official` từ cấu hình, mà hai thứ

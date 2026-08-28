@@ -1,4 +1,6 @@
-"""Thứ chỉ riêng Shopee mới có, và KHÔNG phụ thuộc vào SKU nào.
+"""Shopee constants that hold for every SKU.
+
+Thứ chỉ riêng Shopee mới có, và KHÔNG phụ thuộc vào SKU nào.
 
 Tách khỏi config.py chung để khi thêm TikTok/Logitech, mỗi nguồn có
 settings.py của riêng nó mà không ai giẫm chân ai.

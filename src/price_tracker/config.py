@@ -1,4 +1,6 @@
-"""Cấu hình dùng chung cho MỌI nguồn dữ liệu.
+"""Paths, environment, and the SKU list -- everything not tied to one source.
+
+Cấu hình dùng chung cho MỌI nguồn dữ liệu.
 
 Cố ý không chứa gì riêng của Shopee: thứ riêng từng nguồn nằm ở
 sources/<nguồn>/settings.py, còn danh sách SKU là dữ liệu nên nằm ở
@@ -13,7 +15,9 @@ from dotenv import load_dotenv
 
 
 def find_project_root() -> Path:
-    """Dò ngược lên tìm thư mục chứa pyproject.toml.
+    """Walk up until a directory contains pyproject.toml.
+
+    Dò ngược lên tìm thư mục chứa pyproject.toml.
 
     Không dùng parents[n] nữa. Con số n phụ thuộc file này nằm sâu mấy cấp,
     nên mỗi lần đổi cấu trúc thư mục là nó sai — và sai IM LẶNG, không có
@@ -46,7 +50,9 @@ USER_DATA_DIR = os.getenv("SHOPEE_USER_DATA_DIR")
 
 
 def require_user_data_dir() -> str:
-    """Kiểm tra USER_DATA_DIR ngay trước khi thực sự cần mở browser.
+    """Return the Chrome profile path, or fail with a fix-it message.
+
+    Kiểm tra USER_DATA_DIR ngay trước khi thực sự cần mở browser.
 
     Cố tình KHÔNG raise ở tầng module: config bị import gián tiếp bởi
     transform.py và cả test suite, mà hai chỗ đó không hề đụng tới browser.
@@ -76,7 +82,9 @@ SKUS_FILE = PROJECT_ROOT / "config" / "skus.yaml"
 
 
 def load_skus() -> list[dict]:
-    """Đọc toàn bộ danh sách SKU từ config/skus.yaml.
+    """Read the whole SKU list from config/skus.yaml.
+
+    Đọc toàn bộ danh sách SKU từ config/skus.yaml.
 
     Kiểm luôn hình dạng tài liệu. Sửa YAML thành mapping thay vì list là lỗi
     gõ nhầm rất dễ mắc, mà nếu không chặn thì vòng lặp phía dưới đi qua các
@@ -101,7 +109,9 @@ def load_skus() -> list[dict]:
 
 
 def get_listings(sku: str, source: str) -> list[dict]:
-    """Danh sách LISTING của một SKU trên một sàn.
+    """Return every listing of one SKU on one marketplace.
+
+    Danh sách LISTING của một SKU trên một sàn.
 
     Trả list chứ không phải một dict: cùng một sản phẩm được nhiều người bán
     rao trên cùng một sàn, mỗi người một item_id. Chính chỗ đó mới đẻ ra được
@@ -124,7 +134,9 @@ def get_listings(sku: str, source: str) -> list[dict]:
 
 
 def _as_listing_list(sku: str, source: str, listings) -> list[dict]:
-    """Ép về list và kiểm HÌNH DẠNG, cố ý không kiểm nội dung từng listing.
+    """Normalise one source entry into a list of listings.
+
+    Ép về list và kiểm HÌNH DẠNG, cố ý không kiểm nội dung từng listing.
 
     Ranh giới này có chủ đích. Hình dạng sai (mapping thay vì list, listing
     không phải khối key/value) là hỏng cả file cấu hình — không đọc tiếp được,
@@ -153,7 +165,9 @@ def _as_listing_list(sku: str, source: str, listings) -> list[dict]:
 
 
 def listing_label(listing_cfg: dict) -> str:
-    """Nhãn nhận dạng một listing, dùng thống nhất ở log, tóm tắt và báo lỗi.
+    """Name a listing the same way everywhere: SKU/item_id.
+
+    Nhãn nhận dạng một listing, dùng thống nhất ở log, tóm tắt và báo lỗi.
 
     Phải có CẢ sku lẫn item_id: hai listing của cùng một SKU mà chỉ ghi sku thì
     không biết cái nào hỏng; chỉ ghi item_id thì đọc log không biết là sản phẩm
@@ -164,7 +178,9 @@ def listing_label(listing_cfg: dict) -> str:
 
 
 def load_source_listings(source: str) -> list[dict]:
-    """Mọi cặp (SKU, listing) của một sàn, đã trộn phẳng thành dict duy nhất.
+    """Flatten one marketplace into listing dicts ready to loop over.
+
+    Mọi cặp (SKU, listing) của một sàn, đã trộn phẳng thành dict duy nhất.
 
     Đây là thứ vòng lặp cào dùng: lặp theo LISTING chứ không theo SKU, vì mỗi
     listing là một request thật tới sàn.

@@ -1,3 +1,4 @@
+"""Entry point: scrape every configured listing, then build one record each."""
 import json
 import logging
 
@@ -10,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 def run_batch(listing_configs: list[dict] | None = None) -> tuple[list[dict], dict[str, str]]:
-    """Cào rồi đóng gói cả mẻ. Trả về (record lấy được, lỗi theo từng listing).
+    """Scrape and package a batch; return records plus per-listing failures.
+
+    Cào rồi đóng gói cả mẻ. Trả về (record lấy được, lỗi theo từng listing).
 
     Không ném ở đây mà trả cả hai phần về cho hàm gọi: main() còn phải in tóm
     tắt trước khi báo đỏ. Ném thẳng thì đúng lúc mẻ hỏng — lúc cần nhìn nhất —
@@ -50,6 +53,7 @@ def run_batch(listing_configs: list[dict] | None = None) -> tuple[list[dict], di
 
 
 def main():
+    """Run one batch, print a summary, exit red if any listing failed."""
     listing_configs = load_source_listings("shopee")
     records, failures = run_batch(listing_configs)
 

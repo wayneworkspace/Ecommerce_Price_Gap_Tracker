@@ -1,3 +1,4 @@
+"""Turn a raw Shopee file into one record with a warehouse-ready schema."""
 import json
 import logging
 from datetime import datetime
@@ -23,7 +24,9 @@ SHOPEE_PRICE_SCALE = 100_000
 
 
 def find_latest_raw_file(item_id: str) -> Path:
-    """Trả file raw mới nhất còn DÙNG ĐƯỢC **của đúng SKU này**.
+    """Newest still-usable raw file for one listing.
+
+    Trả file raw mới nhất còn DÙNG ĐƯỢC **của đúng SKU này**.
 
     item_id là tham số BẮT BUỘC, cố ý không cho mặc định. Bản trước glob
     "shopee_raw_*.json" tức vơ hết mọi SKU rồi trả về đúng một file mới nhất —
@@ -87,7 +90,9 @@ def find_latest_raw_file(item_id: str) -> Path:
 
 
 def parse_price(item: dict) -> float | None:
-    """Lấy giá từ item, trả None nếu Shopee không trả giá nào.
+    """Convert Shopee's scaled integer to VND, or None if unusable.
+
+    Lấy giá từ item, trả None nếu Shopee không trả giá nào.
 
     Dùng `is None` chứ KHÔNG dùng `or`: `item.get("price") or ...` coi giá 0
     là falsy nên nó tụt xuống nhánh fallback, làm ta mất khả năng phân biệt
@@ -118,7 +123,9 @@ def parse_price(item: dict) -> float | None:
 
 
 def resolve_scraped_at(raw, raw_path: Path) -> str:
-    """Thời điểm CÀO của file raw này — không phải thời điểm chạy transform.
+    """The time the page was scraped, never the time we ran.
+
+    Thời điểm CÀO của file raw này — không phải thời điểm chạy transform.
 
     Phân biệt hai mốc đó là cả vấn đề. find_latest_raw_file() có thể trả về một
     bản cào CŨ khi bản mới nhất hỏng; nếu chỗ này đóng dấu datetime.now() thì
@@ -151,7 +158,9 @@ def resolve_scraped_at(raw, raw_path: Path) -> str:
 
 
 def build_record(raw_path: Path, listing_cfg: dict) -> dict:
-    """Ép file raw về schema chung, trộn thêm phần danh tính đến từ cấu hình.
+    """Map a raw file plus its config into one record.
+
+    Ép file raw về schema chung, trộn thêm phần danh tính đến từ cấu hình.
 
     listing_cfg là tham số BẮT BUỘC, cố ý không cho mặc định. Record phải mang
     HAI TẦNG danh tính, và tầng trên chỉ có trong cấu hình:
@@ -217,6 +226,7 @@ def save_record(record: dict) -> Path:
     #    dưới, đúng thứ dbt incremental unique_key sinh ra để dẹp.
     # 2. Truy vết — record_<ts>.json khớp thẳng với raw_<ts>.json sinh ra nó,
     #    khỏi phải dò mtime để biết bản ghi này từ bản cào nào.
+    """Write the record to data/staging, named by scrape time."""
     ts = format_timestamp(datetime.fromisoformat(record["scraped_at"]))
     out_path = STAGING_DIR / f"shopee_record_{record['item_id']}_{ts}.json"
     out_path.write_text(json.dumps(

@@ -1,4 +1,6 @@
-"""Hợp đồng về file raw: payload Shopee trông thế nào, và tên file mang gì.
+"""What a usable Shopee payload looks like, and what a raw filename carries.
+
+Hợp đồng về file raw: payload Shopee trông thế nào, và tên file mang gì.
 
 Tách riêng vì hai chỗ cần đúng kiến thức này mà không được phụ thuộc nhau:
 extract.py (chặn trước khi ghi ra đĩa) và transform.py (bỏ qua file đã hỏng).
@@ -26,12 +28,16 @@ _RAW_TIMESTAMP_PATTERN = re.compile(r"(\d{8}T\d{6}Z)")
 
 
 def format_timestamp(moment: datetime) -> str:
-    """Đóng dấu thời gian để đặt tên file. Luôn quy về UTC trước."""
+    """Format a UTC timestamp for a raw filename.
+
+    Đóng dấu thời gian để đặt tên file. Luôn quy về UTC trước."""
     return moment.astimezone(timezone.utc).strftime(RAW_TIMESTAMP_FORMAT)
 
 
 def find_scraped_at(raw) -> str | None:
-    """Đọc scraped_at từ envelope, None nếu không có hoặc không đọc được.
+    """Read scraped_at from the envelope, or None if unusable.
+
+    Đọc scraped_at từ envelope, None nếu không có hoặc không đọc được.
 
     Có kiểm tra parse được chứ không chỉ kiểm tra "là chuỗi khác rỗng": một
     giá trị rác vẫn là chuỗi, và nó sẽ đi thẳng vào record rồi xuống warehouse.
@@ -59,7 +65,9 @@ def find_scraped_at(raw) -> str | None:
 
 
 def scraped_at_from_filename(name: str) -> str | None:
-    """Suy ra thời điểm cào từ tên file, None nếu tên không theo quy ước.
+    """Recover the scrape time from a filename.
+
+    Suy ra thời điểm cào từ tên file, None nếu tên không theo quy ước.
 
     Dùng cho file cào trước khi envelope có scraped_at — data/raw/ đang có
     file thật thuộc loại đó, coi chúng là hỏng là tự vứt dữ liệu còn tốt.
@@ -78,7 +86,9 @@ def scraped_at_from_filename(name: str) -> str | None:
 
 
 def find_item(payload) -> dict | None:
-    """Trả về block `item`, hoặc None nếu payload này không dùng được.
+    """Return the item block, or None if Shopee refused us.
+
+    Trả về block `item`, hoặc None nếu payload này không dùng được.
 
     Trả None thay vì ném: hai chỗ gọi cần phản ứng khác nhau — extract.py biến
     nó thành FetchFailedError để tenacity retry, còn find_latest_raw_file()
@@ -109,7 +119,9 @@ def find_item(payload) -> dict | None:
 
 
 def describe_problem(payload) -> str:
-    """Mô tả ngắn gọn payload hỏng ở đâu, để nhét vào thông báo lỗi/log.
+    """Say in one phrase why a payload is unusable.
+
+    Mô tả ngắn gọn payload hỏng ở đâu, để nhét vào thông báo lỗi/log.
 
     Kèm nguyên văn error/error_msg Shopee trả về — nuốt mất hai giá trị này là
     vứt đi manh mối tốt nhất để biết mình bị chặn hay chỉ gặp trục trặc tạm.
@@ -125,7 +137,9 @@ def describe_problem(payload) -> str:
 
 
 def find_item_in_raw(raw) -> dict | None:
-    """Lấy item từ NỘI DUNG một file raw — chấp nhận cả hai khuôn file.
+    """Return the item block from a raw file, either envelope shape.
+
+    Lấy item từ NỘI DUNG một file raw — chấp nhận cả hai khuôn file.
 
     extract.py hiện ghi envelope {"data": <payload>, "url": ...}, nhưng file cào
     bằng bản code trước khi có envelope là payload trần. data/raw/ đang có file
@@ -140,7 +154,9 @@ def find_item_in_raw(raw) -> dict | None:
 
 
 def describe_raw_problem(raw) -> str:
-    """Mô tả vì sao nội dung một file raw không dùng được.
+    """Say in one phrase why a raw file is unusable.
+
+    Mô tả vì sao nội dung một file raw không dùng được.
 
     Phân biệt hai khuôn bằng key "url": chỉ envelope mới có. Nếu không phân biệt
     thì với payload trần ta sẽ đi mô tả nhầm lớp bên trong và báo "thiếu item"
