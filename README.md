@@ -59,7 +59,6 @@ Unauthorized resellers undercut official pricing on marketplaces, eroding brand 
 
 ![Architecture — scrape to Power BI](architecture.png)
 
-> **Design note:** the diagram shows the initial design with a dedicated "Orchestration Metadata Store" Postgres instance. That instance was cut — Airflow already needs a metadata database, so a second Postgres duplicates it without adding capability. The current plan runs a **single Postgres instance** with two schemas: `airflow` (orchestrator metadata) and `warehouse` (raw/staging/mart).
 
 
 ## Tech Stack Rationale
