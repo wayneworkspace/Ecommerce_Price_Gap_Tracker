@@ -1,148 +1,152 @@
-# Ecommerce_Price_Gap_Tracker
+<div align="center">
 
-![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
-![Airflow](https://img.shields.io/badge/Apache%20Airflow-Orchestration-017CEE?logo=apacheairflow&logoColor=white)
-![dbt](https://img.shields.io/badge/dbt-Transformation-FF694B?logo=dbt&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Warehouse-4169E1?logo=postgresql&logoColor=white)
-![Playwright](https://img.shields.io/badge/Playwright-Scraping-2EAD33?logo=playwright&logoColor=white)
-![Power BI](https://img.shields.io/badge/Power%20BI-Consumption-F2C811?logo=powerbi&logoColor=black)
+# Ecommerce Price Gap Tracker
+
+**Automated ELT pipeline for MAP-compliance monitoring across Vietnamese e-commerce channels**
+
+Scrapes Logitech SKU prices from the official store, Shopee, and TikTok Shop, then flags resellers pricing below the official reference.
+
 ![Status](https://img.shields.io/badge/Status-In%20Progress-yellow)
 
-An automated ELT pipeline that scrapes prices for a small set of Logitech SKUs from the brand's official store and two major Vietnamese marketplaces (Shopee, TikTok Shop), then compares them against the official reference price to flag unauthorized-reseller price violations (MAP compliance).
+<p align="center">
+    <img src="https://skillicons.dev/icons?i=py" alt="Python" width="48" />
+    <img src="https://raw.githubusercontent.com/devicons/devicon/master/icons/apacheairflow/apacheairflow-original.svg" alt="Apache Airflow" width="48" />
+    <img src="https://raw.githubusercontent.com/gilbarbara/logos/main/logos/dbt-icon.svg" alt="dbt" width="48" />
+    <img src="https://skillicons.dev/icons?i=postgres" alt="PostgreSQL" width="48" />
+    <img src="https://raw.githubusercontent.com/devicons/devicon/master/icons/playwright/playwright-original.svg" alt="Playwright" width="48" />
+    <img src="https://skillicons.dev/icons?i=docker" alt="Docker" width="48" />
+    <img src="https://raw.githubusercontent.com/microsoft/PowerBI-Icons/main/SVG/Power-BI.svg" alt="Power BI" width="48" />
+</p>
+
+`Python` · `Apache Airflow` · `dbt` · `PostgreSQL` · `Playwright` · `Docker` · `Power BI`
+
+</div>
 
 ---
 
-## Business Value
+## What This Demonstrates
 
-Unauthorized resellers routinely undercut or misrepresent official pricing on third-party marketplaces, which erodes brand trust and margin for authorized channels. Manually checking prices across channels does not scale and produces inconsistent, stale snapshots.
+- **Right-sized architecture** — one Postgres instance, no Kafka/Spark/object storage. Data volume (~1 MB/month) doesn't justify them, and unjustified tooling is the failure mode this project explicitly avoids.
+- **Idempotent, auditable pipelines** — append-only raw layer, dbt incremental merge for dedup, quarantine table for malformed records.
+- **Production habits at portfolio scale** — retry/backoff, schema tests, dependency-ordered orchestration, reproducible environment.
 
-This pipeline answers a concrete business question: **"Which SKUs and which sellers on Shopee/TikTok are currently priced below Logitech's official reference price, and by how much?"**
+## Business Problem
 
-Planned outputs (Power BI):
+Unauthorized resellers undercut official pricing on marketplaces, eroding brand trust and margin for authorized channels. Manual cross-channel price checks don't scale and produce stale, inconsistent snapshots.
+
+**The question this pipeline answers:** *Which SKUs and sellers on Shopee/TikTok are currently priced below Logitech's official reference price — and by how much?*
+
+<details>
+<summary><strong>Planned Power BI views (10)</strong></summary>
+<br>
 
 | # | View | Question it answers |
 |---|---|---|
-| 1 | Price Gap % | How far is marketplace price from the official reference price, per SKU, per day? |
-| 2 | Anomaly Alert Table | Which SKUs are priced >15% below reference — likely unauthorized/grey-market stock? |
+| 1 | Price Gap % | Distance from official reference price, per SKU per day |
+| 2 | Anomaly Alert Table | SKUs priced >15% below reference — likely grey-market stock |
 | 3 | Seller Compliance Ranking | Which sellers repeatedly violate MAP? |
-| 4 | Price Volatility Index | Which SKUs swing in price the most day-to-day? |
-| 5 | Historical Price Trend | How does price move across the three channels over time (sale cycles)? |
+| 4 | Price Volatility Index | Which SKUs swing most day-to-day? |
+| 5 | Historical Price Trend | Price movement across three channels over sale cycles |
 | 6 | Discount Depth Distribution | How aggressive is each channel's discounting? |
-| 7 | Pipeline Health Tile | When did each source last scrape successfully, and how often does it fail? |
-| 8 | Stock Availability Tracker | Do suspicious sellers sell out unusually fast (small-batch grey-market signal)? |
-| 9 | Cross-Channel Consistency | Does the same SKU differ in price between TikTok and Shopee? |
-| 10 | Weekly Executive Summary | Top 3 SKUs with the largest price deviation this week |
+| 7 | Pipeline Health Tile | Last successful scrape per source; failure frequency |
+| 8 | Stock Availability Tracker | Do suspicious sellers sell out unusually fast? |
+| 9 | Cross-Channel Consistency | Same SKU, different price between TikTok and Shopee? |
+| 10 | Weekly Executive Summary | Top 3 SKUs with the largest deviation this week |
 
-This is not a "learn Airflow/dbt" exercise — the tools exist because the underlying problem (ordered, auditable, repeatable price comparison across sources) requires them.
-
----
+</details>
 
 ## Architecture
 
-![Architecture — scrape to Power BI](architecture.png)
+```mermaid
+flowchart LR
+    subgraph Sources
+        A[Official Store]
+        B[Shopee]
+        C[TikTok Shop]
+    end
 
-> **Design note:** the diagram above shows the initial design with a dedicated "Orchestration Metadata Store" Postgres instance. That instance was cut in the current plan — Airflow already requires a metadata database to track DAG runs, so a second, separate Postgres for "orchestration logs" duplicates that without adding capability. The current plan runs a **single Postgres instance** with two schemas: `airflow` (orchestrator metadata) and `warehouse` (raw/staging/mart).
+    subgraph Pipeline["Airflow-orchestrated"]
+        D[Playwright<br/>scraper] --> E[(raw<br/>append-only)]
+        E --> F[(staging<br/>cast + dedup)]
+        F --> G[(mart<br/>price_gap_pct)]
+        F -. cast failures .-> Q[(quarantine)]
+    end
 
-- **raw** → untouched scrape output, one row per scrape event (append-only, no dedup).
-- **staging** → cast, type-enforced, deduplicated via dbt `unique_key` merge (no separate "dedup DAG" — see Challenges).
-- **mart** → `price_gap_pct` and aggregate views computed with window functions, ready for Power BI.
+    A & B & C --> D
+    G --> H[Power BI]
 
----
+    style Q fill:#8b5a2b22,stroke:#b8860b
+```
+
+A **single Postgres instance**, two schemas: `airflow` (orchestrator metadata) and `warehouse` (raw / staging / mart). Transformations run in dbt — `LAG()` window functions for day-over-day comparison, schema tests (`not_null`, `accepted_range`), incremental merge for idempotency.
 
 ## Tech Stack Rationale
 
 | Tool | Why it's here | What breaks without it |
 |---|---|---|
-| **Playwright** | Marketplace pages render client-side JS; a plain HTTP client can't reliably extract price/stock fields | No usable HTML to parse |
-| **Pandas / NumPy** | Lightweight structural validation before data leaves the ingestion layer | Malformed records reach the warehouse undetected |
-| **Airflow** | Scrape → stage → transform must run in order; a failed step (e.g., Shopee blocked) must not silently corrupt downstream data | Cron jobs run independently with no dependency guarantee — an out-of-order run produces meaningless comparisons |
-| **dbt** | Transform logic includes a window function (`LAG()`) comparing price across days, plus schema tests (`not_null`, `accepted_range`) and incremental merge for idempotency | Ad hoc SQL in Python has no lineage, no automated data-quality gate, and reprocesses full history on every run |
-| **PostgreSQL** | Single relational store, sufficient at this data volume (a handful of SKUs, ~1 MB/month) | N/A — no case for a separate object store at this scale |
-| **Docker Compose** | Reproducible local environment for anyone reviewing the project | Reviewer cannot run the pipeline without manually replicating the local setup |
-| **Power BI** | Consumption layer for the business questions above | N/A |
-
-No Kafka, Spark, or object storage — data volume does not justify them, and adding them without justification is the failure mode this project is explicitly avoiding.
-
----
+| **Playwright** | Marketplace pages render client-side JS | No usable HTML to parse |
+| **Pandas / NumPy** | Structural validation at the ingestion layer | Malformed records reach the warehouse undetected |
+| **Airflow** | Scrape → stage → transform must run in order; a failed step must not corrupt downstream data | Independent cron jobs give no dependency guarantee |
+| **dbt** | Window functions, schema tests, incremental merge — with lineage | Ad hoc SQL: no lineage, no quality gate, full reprocessing every run |
+| **PostgreSQL** | Sufficient relational store at this volume | N/A — no case for more at this scale |
+| **Docker Compose** | Reproducible environment for reviewers | Manual setup replication required |
+| **Power BI** | Consumption layer | N/A |
 
 ## Challenges & Solutions
 
 | Challenge | Solution |
 |---|---|
-| Anti-bot / selector instability on Shopee and TikTok | Validated manually before building any orchestration: run the scraper repeatedly against a single SKU to confirm selectors hold and no IP block occurs, *before* writing a single DAG |
-| Scrape failures (site layout change, transient block) | `tenacity`-based exponential backoff, randomized 3–8s delay between requests |
-| Re-running the pipeline must not duplicate raw rows | Handled at the transform layer with a dbt incremental model (`unique_key` merge/upsert) instead of a second "dedup DAG" — a dedicated DAG whose only job is deleting duplicates is redundant when dbt's native merge strategy already solves it |
-| Malformed or null price fields after cast | Routed to a `quarantine` table rather than silently entering `mart` — a cast failure that reaches the mart layer undetected defeats the purpose of having a mart layer |
-| Marketplace Terms of Service | Rate-limited scraping respecting `robots.txt`; representative raw HTML samples are cached locally so the project can be demonstrated offline if a live source becomes unavailable |
-
----
+| Anti-bot / selector instability | Validated selectors manually against a single SKU **before** writing any DAG |
+| Transient scrape failures | `tenacity` exponential backoff + randomized 3–8s delays |
+| Re-runs must not duplicate rows | dbt incremental merge (`unique_key`) — no redundant "dedup DAG" |
+| Malformed price fields after cast | Routed to `quarantine`, never silently into `mart` |
+| Marketplace ToS | Rate-limited, respects `robots.txt`; cached HTML samples enable offline demo |
 
 ## Roadmap
 
 | Week | Phase | Status |
 |---|---|---|
-| 1–2 | Manual Playwright validation + raw ingestion for 2–3 SKUs | In progress |
-| 3–4 | Postgres warehouse schema + Docker Compose | Planned |
-| 5–6 | dbt transformations + Airflow orchestration | Planned |
-| 7–8 | Power BI dashboards + README polish | Planned |
+| 1–2 | Playwright validation + raw ingestion (2–3 SKUs) | 🟡 In progress |
+| 3–4 | Postgres schema + Docker Compose | ⚪ Planned |
+| 5–6 | dbt transformations + Airflow orchestration | ⚪ Planned |
+| 7–8 | Power BI dashboards + polish | ⚪ Planned |
 
----
+## Setup
 
-## Setup Instructions
-
-Weeks 1-2 of the roadmap cover the crawler only. Postgres, Docker Compose, dbt and Airflow arrive in weeks 3-6 and are **not** part of this setup yet.
+> Weeks 1–2 cover the crawler only. Postgres, Docker Compose, dbt, and Airflow arrive in weeks 3–6.
 
 ```bash
 git clone https://github.com/wayneworkspace/Ecommerce_Price_Gap_Tracker.git
 cd Ecommerce_Price_Gap_Tracker
 
 pip install -e ".[crawler,dev]"   # crawler = patchright + tenacity, dev = pytest
-patchright install chrome         # real Chrome, not bundled Chromium - see Issue 3
-
-cp .env.example .env              # then edit it, see the table below
+patchright install chrome         # real Chrome, not bundled Chromium
+cp .env.example .env
 ```
 
-`.env` has one required variable:
+One required variable in `.env`:
 
-| Variable | What it is | What breaks without it |
-|---|---|---|
-| `SHOPEE_USER_DATA_DIR` | Absolute path to the Chrome persistent-profile directory holding your logged-in Shopee session | The crawler raises before opening a browser. Shopee redirects anonymous sessions to a login wall, so there is no scrape without a session - see `docs/decisions/0004-persistent-context-thay-vi-export-cookie.md` |
+| Variable | Purpose |
+|---|---|
+| `SHOPEE_USER_DATA_DIR` | Path to the Chrome persistent profile holding your logged-in Shopee session. Shopee walls off anonymous sessions — no session, no scrape. See `docs/decisions/0004`. |
 
-Log into that profile once, by hand:
+Log in once, by hand (persists in the profile; repeat only when the session expires):
 
 ```bash
 python scripts/shopee_login.py
 ```
 
-The script opens a real browser and waits. You log in yourself - including the captcha, if one appears - then press Enter. The session persists inside the profile directory, so this is a one-time step; repeat it only when the session expires.
-
-Run the pipeline:
+Run the pipeline and tests:
 
 ```bash
-price-tracker-shopee
-# equivalently: python -m price_tracker.sources.shopee.main
+price-tracker-shopee   # writes to data/raw/ and data/staging/; SKUs configured in config/skus.yaml
+pytest                 # no network, browser, or .env needed
 ```
-
-It writes the untouched API response to `data/raw/` and the mapped record to `data/staging/`. Which SKUs are scraped is configured in `config/skus.yaml`, not in code.
-
-Run the tests - they need neither network nor browser, and work without a `.env`:
-
-```bash
-pytest
-```
-
-### Not available yet
-
-| Step | Status |
-|---|---|
-| `docker-compose up -d` | Planned, weeks 3-4 |
-| Airflow UI at `localhost:8080`, triggering `scrape_prices_dag` | Planned, weeks 5-6 |
-
----
 
 ## Data Model (planned)
 
-`raw_prices`: `sku_id`, `source`, `seller_id`, `product_name`, `price`, `url`, `scraped_at`
-`staging_prices`: cast + deduplicated version of the above
-`mart_price_gap`: `sku_id`, `source`, `price`, `price_change_pct` (day-over-day, via `LAG()`)
+| Table | Contents |
+|---|---|
+| `raw_prices` | `sku_id`, `source`, `seller_id`, `product_name`, `price`, `url`, `scraped_at` |
+| `staging_prices` | Cast + deduplicated |
+| `mart_price_gap` | `sku_id`, `source`, `price`, `price_change_pct` (day-over-day via `LAG()`) |
