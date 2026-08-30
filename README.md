@@ -57,28 +57,10 @@ Unauthorized resellers undercut official pricing on marketplaces, eroding brand 
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph Sources
-        A[Official Store]
-        B[Shopee]
-        C[TikTok Shop]
-    end
+![Architecture — scrape to Power BI](architecture.png)
 
-    subgraph Pipeline["Airflow-orchestrated"]
-        D[Playwright<br/>scraper] --> E[(raw<br/>append-only)]
-        E --> F[(staging<br/>cast + dedup)]
-        F --> G[(mart<br/>price_gap_pct)]
-        F -. cast failures .-> Q[(quarantine)]
-    end
+> **Design note:** the diagram shows the initial design with a dedicated "Orchestration Metadata Store" Postgres instance. That instance was cut — Airflow already needs a metadata database, so a second Postgres duplicates it without adding capability. The current plan runs a **single Postgres instance** with two schemas: `airflow` (orchestrator metadata) and `warehouse` (raw/staging/mart).
 
-    A & B & C --> D
-    G --> H[Power BI]
-
-    style Q fill:#8b5a2b22,stroke:#b8860b
-```
-
-A **single Postgres instance**, two schemas: `airflow` (orchestrator metadata) and `warehouse` (raw / staging / mart). Transformations run in dbt — `LAG()` window functions for day-over-day comparison, schema tests (`not_null`, `accepted_range`), incremental merge for idempotency.
 
 ## Tech Stack Rationale
 
