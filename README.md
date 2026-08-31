@@ -20,24 +20,45 @@ Scrapes Logitech SKU prices from the official store, Shopee, and TikTok Shop, th
 
 `Python` · `Apache Airflow` · `dbt` · `PostgreSQL` · `Playwright` · `Docker` · `Power BI`
 
+<br>
+
+`~1 MB / month` · `3 Channels` · `8 Weeks` · `MAP Monitoring`
+
 </div>
 
 ---
 
 ## What This Demonstrates
 
-- **Right-sized architecture** — one Postgres instance, no Kafka/Spark/object storage. Data volume (~1 MB/month) doesn't justify them, and unjustified tooling is the failure mode this project explicitly avoids.
-- **Idempotent, auditable pipelines** — append-only raw layer, dbt incremental merge for dedup, quarantine table for malformed records.
-- **Production habits at portfolio scale** — retry/backoff, schema tests, dependency-ordered orchestration, reproducible environment.
+| ARCHITECTURE | RELIABILITY | ENGINEERING |
+|---|---|---|
+| Right-sized architecture | Idempotent ELT | Production habits |
+| PostgreSQL at ~1 MB/month | Append-only raw layer | Retry / backoff |
+| No unnecessary Kafka/Spark/object storage | Incremental merge | Schema tests |
+| Cost-conscious design | Quarantine layer | Dependency ordering |
+
+> **Design principle:** use the smallest architecture that solves the problem reliably.  
+> Data volume does not justify Kafka, Spark, or object storage at this scale.
+
+---
 
 ## Business Problem
 
-Unauthorized resellers undercut official pricing on marketplaces, eroding brand trust and margin for authorized channels. Manual cross-channel price checks don't scale and produce stale, inconsistent snapshots.
+Unauthorized resellers undercut official pricing on marketplaces, eroding brand trust and margin for authorized channels.
 
-**The question this pipeline answers:** *Which SKUs and sellers on Shopee/TikTok are currently priced below Logitech's official reference price — and by how much?*
+Manual cross-channel price checks don't scale and produce stale, inconsistent snapshots.
+
+> **Core question**
+>
+> Which SKUs and sellers on Shopee/TikTok are currently priced below Logitech's official reference price — and by how much?
+
+The pipeline turns those snapshots into a repeatable, auditable ELT workflow that can surface pricing gaps over time.
+
+---
 
 <details>
-<summary><strong>Planned Power BI views (10)</strong></summary>
+<summary><strong>Planned Power BI Views (10)</strong></summary>
+
 <br>
 
 | # | View | Question it answers |
@@ -55,13 +76,75 @@ Unauthorized resellers undercut official pricing on marketplaces, eroding brand 
 
 </details>
 
+---
+
 ## Architecture
 
 ![Architecture — scrape to Power BI](architecture.png)
 
+<p align="center">
 
+`COLLECT` → `STORE` → `TRANSFORM` → `ORCHESTRATE` → `ANALYZE`
 
-## Tech Stack Rationale
+</p>
+
+```text
+Marketplace
+     │
+     ▼
+ Playwright
+     │
+     ▼
+  Raw Data
+     │
+     ▼
+ PostgreSQL
+     │
+     ▼
+    dbt
+     │
+     ▼
+  Airflow
+     │
+     ▼
+ Price Gap Mart
+     │
+     ▼
+  Power BI
+```
+
+The architecture is intentionally small: one PostgreSQL instance, browser-based ingestion where required, dbt for transformation and testing, Airflow for dependency-ordered execution, and Power BI as the consumption layer.
+
+---
+
+## Pipeline Flow
+
+```mermaid
+flowchart LR
+    A["Marketplace"] --> B["Playwright"]
+    B --> C["Raw"]
+    C --> D["PostgreSQL"]
+    D --> E["dbt"]
+    E --> F["Airflow"]
+    F --> G["Price Gap Mart"]
+    G --> H["Power BI"]
+```
+
+### Processing stages
+
+| Stage | Responsibility |
+|---|---|
+| **Collect** | Scrape official and marketplace prices |
+| **Raw** | Preserve source observations as append-only records |
+| **Validate** | Check structure and route malformed records to quarantine |
+| **Stage** | Cast fields and remove duplicate observations |
+| **Transform** | Calculate price gaps and day-over-day changes |
+| **Orchestrate** | Run scrape → stage → transform in dependency order |
+| **Analyze** | Surface pricing violations and trends in Power BI |
+
+---
+
+## Why These Tools?
 
 | Tool | Why it's here | What breaks without it |
 |---|---|---|
@@ -73,17 +156,23 @@ Unauthorized resellers undercut official pricing on marketplaces, eroding brand 
 | **Docker Compose** | Reproducible environment for reviewers | Manual setup replication required |
 | **Power BI** | Consumption layer | N/A |
 
+> **Architecture decision:** Kafka, Spark, and object storage are deliberately excluded.
+>
+> At approximately 1 MB/month, introducing distributed infrastructure would add operational complexity without solving an actual scaling problem.
+
+---
+
 ## Challenges & Solutions
 
-| Challenge | Solution |
-|---|---|
-| Anti-bot / selector instability | Validated selectors manually against a single SKU **before** writing any DAG |
-| Transient scrape failures | `tenacity` exponential backoff + randomized 3–8s delays |
-| Re-runs must not duplicate rows | dbt incremental merge (`unique_key`) — no redundant "dedup DAG" |
-| Malformed price fields after cast | Routed to `quarantine`, never silently into `mart` |
-| Marketplace ToS | Rate-limited, respects `robots.txt`; cached HTML samples enable offline demo |
+| Challenge | Solution | Outcome |
+|---|---|---|
+| Anti-bot / selector instability | Validated selectors manually against a single SKU **before** writing any DAG | More predictable scraping |
+| Transient scrape failures | `tenacity` exponential backoff + randomized 3–8s delays | Retry-safe ingestion |
+| Re-runs must not duplicate rows | dbt incremental merge (`unique_key`) — no redundant "dedup DAG" | Idempotent pipeline |
+| Malformed price fields after cast | Routed to `quarantine`, never silently into `mart` | Clean analytical layer |
+| Marketplace ToS | Rate-limited, respects `robots.txt`; cached HTML samples enable offline demo | Controlled and reproducible demo |
 
-## Roadmap
+---
 
 ## 02 — Roadmap
 
@@ -112,6 +201,16 @@ ANALYTICS                                              ●━━━━━━━�
                                                                   ◆ MVP DELIVERY
 </pre>
 
+### Roadmap milestones
+
+| Phase | Weeks | Deliverable |
+|---|---:|---|
+| **Crawler** | 1–2 | Validated Playwright crawler + raw price ingestion |
+| **Database** | 3–4 | Reproducible PostgreSQL + Docker environment |
+| **Pipeline** | 5–6 | dbt transformations + Airflow orchestration |
+| **Analytics** | 7–8 | Power BI dashboards + final polish |
+
+---
 
 ## Setup
 
@@ -132,7 +231,7 @@ One required variable in `.env`:
 |---|---|
 | `SHOPEE_USER_DATA_DIR` | Path to the Chrome persistent profile holding your logged-in Shopee session. Shopee walls off anonymous sessions — no session, no scrape. See `docs/decisions/0004`. |
 
-Log in once, by hand (persists in the profile; repeat only when the session expires):
+Log in once, by hand. The session persists in the profile and only needs to be repeated when the session expires:
 
 ```bash
 python scripts/shopee_login.py
@@ -145,10 +244,106 @@ price-tracker-shopee   # writes to data/raw/ and data/staging/; SKUs configured 
 pytest                 # no network, browser, or .env needed
 ```
 
-## Data Model (planned)
+---
 
-| Table | Contents |
-|---|---|
-| `raw_prices` | `sku_id`, `source`, `seller_id`, `product_name`, `price`, `url`, `scraped_at` |
-| `staging_prices` | Cast + deduplicated |
-| `mart_price_gap` | `sku_id`, `source`, `price`, `price_change_pct` (day-over-day via `LAG()`) |
+## Data Model
+
+### Data lineage
+
+```mermaid
+flowchart LR
+    A["raw_prices<br/>Append-only"] 
+    --> B["staging_prices<br/>Cast + deduplicate"]
+    --> C["mart_price_gap<br/>Business metrics"]
+    --> D["Power BI"]
+```
+
+| Layer | Table | Contents |
+|---|---|---|
+| **RAW** | `raw_prices` | `sku_id`, `source`, `seller_id`, `product_name`, `price`, `url`, `scraped_at` |
+| **STAGING** | `staging_prices` | Cast + deduplicated |
+| **MART** | `mart_price_gap` | `sku_id`, `source`, `price`, `price_change_pct` (day-over-day via `LAG()`) |
+
+### Data quality rules
+
+```text
+raw_prices
+    │
+    ├── valid ────────────────► staging_prices
+    │                                │
+    │                                ▼
+    │                         mart_price_gap
+    │
+    └── malformed ───────────► quarantine
+```
+
+The raw layer remains append-only for auditability. Transformation logic handles deduplication and business calculations, while malformed records are isolated rather than silently entering the analytical mart.
+
+---
+
+## Project Structure
+
+```text
+.
+├── config/
+│   └── skus.yaml
+│
+├── data/
+│   ├── raw/
+│   └── staging/
+│
+├── dbt/
+│   ├── models/
+│   └── tests/
+│
+├── dags/
+│   └── price_gap_pipeline.py
+│
+├── docs/
+│   └── decisions/
+│
+├── scripts/
+│   └── shopee_login.py
+│
+├── tests/
+│
+├── architecture.png
+├── .env.example
+└── README.md
+```
+
+---
+
+## Engineering Principles
+
+This project intentionally favors **simple, explicit, and auditable engineering decisions** over unnecessary infrastructure.
+
+### 01 — Right-sized architecture
+
+The system is designed around the actual data volume rather than an imagined future scale.
+
+### 02 — Idempotency
+
+Pipeline re-runs should produce the same logical result without creating duplicate observations.
+
+### 03 — Data quality before analytics
+
+Malformed records are quarantined before they can reach the business-facing mart.
+
+### 04 — Reproducibility
+
+Docker Compose and explicit dependency management make the environment easier to reproduce.
+
+### 05 — Explainable decisions
+
+Every major tool has a concrete reason to exist — and tools without a justified role are intentionally excluded.
+
+---
+
+<div align="center">
+
+### Build → Validate → Transform → Monitor
+
+**Ecommerce Price Gap Tracker**
+
+</div>
