@@ -85,12 +85,253 @@ Unauthorized resellers undercut official pricing on marketplaces, eroding brand 
 
 ## Roadmap
 
-| Week | Phase | Status |
-|---|---|---|
-| 1–2 | Playwright validation + raw ingestion (2–3 SKUs) | 🟡 In progress |
-| 3–4 | Postgres schema + Docker Compose | ⚪ Planned |
-| 5–6 | dbt transformations + Airflow orchestration | ⚪ Planned |
-| 7–8 | Power BI dashboards + polish | ⚪ Planned |
+<h2>02 — Roadmap</h2>
+
+<div align="center">
+
+<svg width="900" viewBox="0 0 900 420"
+     xmlns="http://www.w3.org/2000/svg">
+
+  <!-- ============================= -->
+  <!-- HEADER -->
+  <!-- ============================= -->
+
+  <text x="20" y="35"
+        font-family="Arial, sans-serif"
+        font-size="11"
+        font-weight="700"
+        fill="#64748B"
+        letter-spacing="2">
+    PHASE
+  </text>
+
+  <!-- Week labels -->
+
+  <g font-family="Arial, sans-serif"
+     font-size="11"
+     fill="#64748B"
+     text-anchor="middle">
+
+    <text x="300" y="35">01</text>
+    <text x="370" y="35">02</text>
+    <text x="440" y="35">03</text>
+    <text x="510" y="35">04</text>
+    <text x="580" y="35">05</text>
+    <text x="650" y="35">06</text>
+    <text x="720" y="35">07</text>
+    <text x="790" y="35">08</text>
+
+  </g>
+
+
+  <!-- ============================= -->
+  <!-- TIMELINE GRID -->
+  <!-- ============================= -->
+
+  <g stroke="#1E293B"
+     stroke-width="1">
+
+    <line x1="265" y1="55" x2="265" y2="340"/>
+    <line x1="335" y1="55" x2="335" y2="340"/>
+    <line x1="405" y1="55" x2="405" y2="340"/>
+    <line x1="475" y1="55" x2="475" y2="340"/>
+    <line x1="545" y1="55" x2="545" y2="340"/>
+    <line x1="615" y1="55" x2="615" y2="340"/>
+    <line x1="685" y1="55" x2="685" y2="340"/>
+    <line x1="755" y1="55" x2="755" y2="340"/>
+    <line x1="825" y1="55" x2="825" y2="340"/>
+
+  </g>
+
+
+  <!-- ============================= -->
+  <!-- PHASE 01 — CRAWLER -->
+  <!-- ============================= -->
+
+  <text x="20" y="90"
+        font-family="Arial, sans-serif"
+        font-size="13"
+        font-weight="700"
+        fill="#E2E8F0">
+    CRAWLER
+  </text>
+
+  <text x="20" y="108"
+        font-family="Arial, sans-serif"
+        font-size="10"
+        fill="#64748B">
+    Playwright · Raw ingestion
+  </text>
+
+
+  <!-- Timeline -->
+
+  <line x1="300" y1="92"
+        x2="405" y2="92"
+        stroke="#38BDF8"
+        stroke-width="3"/>
+
+  <circle cx="300" cy="92"
+          r="5"
+          fill="#38BDF8"/>
+
+  <circle cx="405" cy="92"
+          r="5"
+          fill="#38BDF8"/>
+
+
+  <!-- ============================= -->
+  <!-- PHASE 02 — DATABASE -->
+  <!-- ============================= -->
+
+  <text x="20" y="160"
+        font-family="Arial, sans-serif"
+        font-size="13"
+        font-weight="700"
+        fill="#E2E8F0">
+    DATABASE
+  </text>
+
+  <text x="20" y="178"
+        font-family="Arial, sans-serif"
+        font-size="10"
+        fill="#64748B">
+    PostgreSQL · Docker
+  </text>
+
+
+  <line x1="440" y1="162"
+        x2="545" y2="162"
+        stroke="#475569"
+        stroke-width="3"/>
+
+  <circle cx="440" cy="162"
+          r="5"
+          fill="#475569"/>
+
+  <circle cx="545" cy="162"
+          r="5"
+          fill="#475569"/>
+
+
+  <!-- ============================= -->
+  <!-- PHASE 03 — PIPELINE -->
+  <!-- ============================= -->
+
+  <text x="20" y="230"
+        font-family="Arial, sans-serif"
+        font-size="13"
+        font-weight="700"
+        fill="#E2E8F0">
+    PIPELINE
+  </text>
+
+  <text x="20" y="248"
+        font-family="Arial, sans-serif"
+        font-size="10"
+        fill="#64748B">
+    dbt · Airflow
+  </text>
+
+
+  <line x1="580" y1="232"
+        x2="685" y2="232"
+        stroke="#475569"
+        stroke-width="3"/>
+
+  <circle cx="580" cy="232"
+          r="5"
+          fill="#475569"/>
+
+  <circle cx="685" cy="232"
+          r="5"
+          fill="#475569"/>
+
+
+  <!-- ============================= -->
+  <!-- PHASE 04 — ANALYTICS -->
+  <!-- ============================= -->
+
+  <text x="20" y="300"
+        font-family="Arial, sans-serif"
+        font-size="13"
+        font-weight="700"
+        fill="#E2E8F0">
+    ANALYTICS
+  </text>
+
+  <text x="20" y="318"
+        font-family="Arial, sans-serif"
+        font-size="10"
+        fill="#64748B">
+    Power BI · Polish
+  </text>
+
+
+  <line x1="720" y1="302"
+        x2="825" y2="302"
+        stroke="#475569"
+        stroke-width="3"/>
+
+  <circle cx="720" cy="302"
+          r="5"
+          fill="#475569"/>
+
+  <circle cx="825" cy="302"
+          r="5"
+          fill="#475569"/>
+
+
+  <!-- ============================= -->
+  <!-- CURRENT MARKER -->
+  <!-- ============================= -->
+
+  <line x1="405" y1="55"
+        x2="405" y2="340"
+        stroke="#38BDF8"
+        stroke-width="1"
+        stroke-dasharray="4 5"
+        opacity="0.55"/>
+
+  <text x="405" y="365"
+        text-anchor="middle"
+        font-family="Arial, sans-serif"
+        font-size="9"
+        font-weight="700"
+        fill="#38BDF8"
+        letter-spacing="1.5">
+    CURRENT
+  </text>
+
+
+  <!-- ============================= -->
+  <!-- DELIVERY -->
+  <!-- ============================= -->
+
+  <line x1="825" y1="340"
+        x2="825" y2="380"
+        stroke="#38BDF8"
+        stroke-width="1"/>
+
+  <circle cx="825" cy="340"
+          r="6"
+          fill="#0F172A"
+          stroke="#38BDF8"
+          stroke-width="2"/>
+
+  <text x="825" y="398"
+        text-anchor="middle"
+        font-family="Arial, sans-serif"
+        font-size="10"
+        font-weight="700"
+        fill="#38BDF8"
+        letter-spacing="1">
+    MVP DELIVERY
+  </text>
+
+</svg>
+
+</div>
 
 ## Setup
 
