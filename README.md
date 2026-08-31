@@ -37,7 +37,7 @@ Scrapes Logitech SKU prices from the official store, Shopee, and TikTok Shop, th
 | No unnecessary Kafka/Spark/object storage | Incremental merge | Schema tests |
 | Cost-conscious design | Quarantine layer | Dependency ordering |
 
-> **Design principle:** use the smallest architecture that solves the problem reliably.  
+> **Design principle:** use the smallest architecture that solves the problem reliably.
 > Data volume does not justify Kafka, Spark, or object storage at this scale.
 
 ---
@@ -88,47 +88,42 @@ The pipeline turns those snapshots into a repeatable, auditable ELT workflow tha
 
 </p>
 
-```text
-Marketplace
-     │
-     ▼
- Playwright
-     │
-     ▼
-  Raw Data
-     │
-     ▼
- PostgreSQL
-     │
-     ▼
-    dbt
-     │
-     ▼
-  Airflow
-     │
-     ▼
- Price Gap Mart
-     │
-     ▼
-  Power BI
-```
-
 The architecture is intentionally small: one PostgreSQL instance, browser-based ingestion where required, dbt for transformation and testing, Airflow for dependency-ordered execution, and Power BI as the consumption layer.
 
 ---
 
 ## Pipeline Flow
 
-```mermaid
-flowchart LR
-    A["Marketplace"] --> B["Playwright"]
-    B --> C["Raw"]
-    C --> D["PostgreSQL"]
-    D --> E["dbt"]
-    E --> F["Airflow"]
-    F --> G["Price Gap Mart"]
-    G --> H["Power BI"]
-```
+<pre>
+MARKETPLACE
+     │
+     ▼
+ PLAYWRIGHT
+   CRAWLER
+     │
+     ▼
+   RAW DATA
+ append-only
+     │
+     ▼
+ POSTGRESQL
+   STORAGE
+     │
+     ▼
+    dbt
+ TRANSFORM
+     │
+     ▼
+  AIRFLOW
+ ORCHESTRATE
+     │
+     ▼
+PRICE GAP MART
+     │
+     ▼
+ POWER BI
+  ANALYZE
+</pre>
 
 ### Processing stages
 
@@ -223,127 +218,3 @@ cd Ecommerce_Price_Gap_Tracker
 pip install -e ".[crawler,dev]"   # crawler = patchright + tenacity, dev = pytest
 patchright install chrome         # real Chrome, not bundled Chromium
 cp .env.example .env
-```
-
-One required variable in `.env`:
-
-| Variable | Purpose |
-|---|---|
-| `SHOPEE_USER_DATA_DIR` | Path to the Chrome persistent profile holding your logged-in Shopee session. Shopee walls off anonymous sessions — no session, no scrape. See `docs/decisions/0004`. |
-
-Log in once, by hand. The session persists in the profile and only needs to be repeated when the session expires:
-
-```bash
-python scripts/shopee_login.py
-```
-
-Run the pipeline and tests:
-
-```bash
-price-tracker-shopee   # writes to data/raw/ and data/staging/; SKUs configured in config/skus.yaml
-pytest                 # no network, browser, or .env needed
-```
-
----
-
-## Data Model
-
-### Data lineage
-
-```mermaid
-flowchart LR
-    A["raw_prices<br/>Append-only"] 
-    --> B["staging_prices<br/>Cast + deduplicate"]
-    --> C["mart_price_gap<br/>Business metrics"]
-    --> D["Power BI"]
-```
-
-| Layer | Table | Contents |
-|---|---|---|
-| **RAW** | `raw_prices` | `sku_id`, `source`, `seller_id`, `product_name`, `price`, `url`, `scraped_at` |
-| **STAGING** | `staging_prices` | Cast + deduplicated |
-| **MART** | `mart_price_gap` | `sku_id`, `source`, `price`, `price_change_pct` (day-over-day via `LAG()`) |
-
-### Data quality rules
-
-```text
-raw_prices
-    │
-    ├── valid ────────────────► staging_prices
-    │                                │
-    │                                ▼
-    │                         mart_price_gap
-    │
-    └── malformed ───────────► quarantine
-```
-
-The raw layer remains append-only for auditability. Transformation logic handles deduplication and business calculations, while malformed records are isolated rather than silently entering the analytical mart.
-
----
-
-## Project Structure
-
-```text
-.
-├── config/
-│   └── skus.yaml
-│
-├── data/
-│   ├── raw/
-│   └── staging/
-│
-├── dbt/
-│   ├── models/
-│   └── tests/
-│
-├── dags/
-│   └── price_gap_pipeline.py
-│
-├── docs/
-│   └── decisions/
-│
-├── scripts/
-│   └── shopee_login.py
-│
-├── tests/
-│
-├── architecture.png
-├── .env.example
-└── README.md
-```
-
----
-
-## Engineering Principles
-
-This project intentionally favors **simple, explicit, and auditable engineering decisions** over unnecessary infrastructure.
-
-### 01 — Right-sized architecture
-
-The system is designed around the actual data volume rather than an imagined future scale.
-
-### 02 — Idempotency
-
-Pipeline re-runs should produce the same logical result without creating duplicate observations.
-
-### 03 — Data quality before analytics
-
-Malformed records are quarantined before they can reach the business-facing mart.
-
-### 04 — Reproducibility
-
-Docker Compose and explicit dependency management make the environment easier to reproduce.
-
-### 05 — Explainable decisions
-
-Every major tool has a concrete reason to exist — and tools without a justified role are intentionally excluded.
-
----
-
-<div align="center">
-
-### Build → Validate → Transform → Monitor
-
-**Ecommerce Price Gap Tracker**
-
-</div>
