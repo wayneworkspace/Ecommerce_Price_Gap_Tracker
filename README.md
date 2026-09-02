@@ -1,5 +1,3 @@
-<div align="center">
-
 # Ecommerce Price Gap Tracker
 
 **Automated ELT pipeline for MAP-compliance monitoring across Vietnamese e-commerce channels**
@@ -8,23 +6,8 @@ Scrapes Logitech SKU prices from the official store, Shopee, and TikTok Shop, th
 
 ![Status](https://img.shields.io/badge/Status-In%20Progress-yellow)
 
-<p align="center">
-    <img src="https://skillicons.dev/icons?i=py" alt="Python" width="48" />
-    <img src="https://raw.githubusercontent.com/devicons/devicon/master/icons/apacheairflow/apacheairflow-original.svg" alt="Apache Airflow" width="48" />
-    <img src="https://raw.githubusercontent.com/gilbarbara/logos/main/logos/dbt-icon.svg" alt="dbt" width="48" />
-    <img src="https://skillicons.dev/icons?i=postgres" alt="PostgreSQL" width="48" />
-    <img src="https://raw.githubusercontent.com/devicons/devicon/master/icons/playwright/playwright-original.svg" alt="Playwright" width="48" />
-    <img src="https://skillicons.dev/icons?i=docker" alt="Docker" width="48" />
-    <img src="https://raw.githubusercontent.com/microsoft/PowerBI-Icons/main/SVG/Power-BI.svg" alt="Power BI" width="48" />
-</p>
-
-`Python` · `Apache Airflow` · `dbt` · `PostgreSQL` · `Playwright` · `Docker` · `Power BI`
-
-<br>
 
 `~1 MB / month` · `3 Channels` · `8 Weeks` · `MAP Monitoring`
-
-</div>
 
 ---
 
@@ -56,23 +39,17 @@ The pipeline turns those snapshots into a repeatable, auditable ELT workflow tha
 
 ---
 
-<details>
-<summary><strong>Planned Power BI Views (10)</strong></summary>
+## Planned Power BI Views
 
-<br>
 
-| # | View | Question it answers |
-|---|---|---|
-| 1 | Price Gap % | Distance from official reference price, per SKU per day |
-| 2 | Anomaly Alert Table | SKUs priced >15% below reference — likely grey-market stock |
-| 3 | Seller Compliance Ranking | Which sellers repeatedly violate MAP? |
-| 4 | Price Volatility Index | Which SKUs swing most day-to-day? |
-| 5 | Historical Price Trend | Price movement across three channels over sale cycles |
-| 6 | Discount Depth Distribution | How aggressive is each channel's discounting? |
-| 7 | Pipeline Health Tile | Last successful scrape per source; failure frequency |
-| 8 | Stock Availability Tracker | Do suspicious sellers sell out unusually fast? |
-| 9 | Cross-Channel Consistency | Same SKU, different price between TikTok and Shopee? |
-| 10 | Weekly Executive Summary | Top 3 SKUs with the largest deviation this week |
+|     # | View                          | Question it answers                                      |
+| ----: | ----------------------------- | -------------------------------------------------------- |
+| **1** | **Price Gap %**               | Core metric của toàn bộ project — phải có                |
+| **2** | **Seller Compliance Ranking** | Thể hiện được góc nhìn business + seller behavior        |
+| **3** | **Historical Price Trend**    | Cho thấy bạn xử lý time-series và historical data        |
+| **4** | **Pipeline Health Tile**      | Rất tốt để thể hiện tư duy Data Engineering / monitoring |
+| **5** | **Weekly Executive Summary**  | Cho thấy bạn biết biến data thành insight cho business   |
+
 
 </details>
 
@@ -94,36 +71,8 @@ The architecture is intentionally small: one PostgreSQL instance, browser-based 
 
 ## Pipeline Flow
 
-<pre>
-MARKETPLACE
-     │
-     ▼
- PLAYWRIGHT
-   CRAWLER
-     │
-     ▼
-   RAW DATA
- append-only
-     │
-     ▼
- POSTGRESQL
-   STORAGE
-     │
-     ▼
-    dbt
- TRANSFORM
-     │
-     ▼
-  AIRFLOW
- ORCHESTRATE
-     │
-     ▼
-PRICE GAP MART
-     │
-     ▼
- POWER BI
-  ANALYZE
-</pre>
+Marketplace → Ingestion → Storage → Orchestration → Transformation  → Mart → BI
+
 
 ### Processing stages
 
@@ -139,21 +88,28 @@ PRICE GAP MART
 
 ---
 
-## Why These Tools?
+## Why These Languages & Tools?
 
+### Tools
 | Tool | Why it's here | What breaks without it |
 |---|---|---|
-| **Playwright** | Marketplace pages render client-side JS | No usable HTML to parse |
-| **Pandas / NumPy** | Structural validation at the ingestion layer | Malformed records reach the warehouse undetected |
 | **Airflow** | Scrape → stage → transform must run in order; a failed step must not corrupt downstream data | Independent cron jobs give no dependency guarantee |
 | **dbt** | Window functions, schema tests, incremental merge — with lineage | Ad hoc SQL: no lineage, no quality gate, full reprocessing every run |
 | **PostgreSQL** | Sufficient relational store at this volume | N/A — no case for more at this scale |
 | **Docker Compose** | Reproducible environment for reviewers | Manual setup replication required |
 | **Power BI** | Consumption layer | N/A |
 
-> **Architecture decision:** Kafka, Spark, and object storage are deliberately excluded.
->
-> At approximately 1 MB/month, introducing distributed infrastructure would add operational complexity without solving an actual scaling problem.
+### Languages
+| Tool | Why it's here | What breaks without it |
+|---|---|---|
+| **Playwright** | Marketplace pages render client-side JS | No usable HTML to parse |
+| **Pandas / NumPy** | Structural validation at the ingestion layer | Malformed records reach the warehouse undetected |
+| **Pathlib** |  |  |
+| **Datetime** |  |  |
+| **Json** |  |  |
+| **Logging** |  |  |
+
+At approximately 1 MB/month, introducing distributed infrastructure would add operational complexity without solving an actual scaling problem.
 
 ---
 
@@ -169,41 +125,17 @@ PRICE GAP MART
 
 ---
 
-## 02 — Roadmap
+## 02 — Project Status
 
-<pre>
-                         01       02       03       04       05       06       07       08
-                         │        │        │        │        │        │        │        │
+|  # | Component                  | Status         |
+| -: | -------------------------- | -------------- |
+| 01 | Playwright crawler         | Implemented  |
+| 02 | Raw ingestion & validation | Implemented  |
+| 03 | PostgreSQL storage         | In progress |
+| 04 | dbt transformations        | In progress |
+| 05 | Airflow orchestration      | In progress |
+| 06 | Power BI dashboard         | Planned      |
 
-CRAWLER                  ●━━━━━━━━●
-                         Playwright · Raw ingestion
-                         └─ IN PROGRESS
-
-DATABASE                          ●━━━━━━━━●
-                                  PostgreSQL · Docker
-                                  └─ PLANNED
-
-PIPELINE                                    ●━━━━━━━━●
-                                            dbt · Airflow
-                                            └─ PLANNED
-
-ANALYTICS                                              ●━━━━━━━━●
-                                                        Power BI · Polish
-                                                        └─ PLANNED
-
-
-                         ────────────────────────────────────────────────────────────────
-                                                                  ◆ MVP DELIVERY
-</pre>
-
-### Roadmap milestones
-
-| Phase | Weeks | Deliverable |
-|---|---:|---|
-| **Crawler** | 1–2 | Validated Playwright crawler + raw price ingestion |
-| **Database** | 3–4 | Reproducible PostgreSQL + Docker environment |
-| **Pipeline** | 5–6 | dbt transformations + Airflow orchestration |
-| **Analytics** | 7–8 | Power BI dashboards + final polish |
 
 ---
 
